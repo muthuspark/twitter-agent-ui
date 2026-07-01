@@ -82,7 +82,7 @@ export function growthActionLabel(action) {
 
 export function normalizeRecommendations(recommendations = [], candidates = []) {
   const candidateById = new Map(candidates.map((candidate) => [String(candidate.id), candidate]));
-  return recommendations.map((recommendation) => {
+  return recommendations.filter((recommendation) => recommendation.action !== "skip").map((recommendation) => {
     const action = recommendation.action ?? "skip";
     const tweet = candidateById.get(String(recommendation.tweet_id)) ?? null;
     const draftOptions = Array.isArray(recommendation.comment_drafts)

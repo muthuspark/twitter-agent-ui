@@ -364,9 +364,13 @@ onMounted(loadHistory);
 
         <div v-else-if="candidates.length" class="grid min-h-72 place-items-center rounded-md border border-dashed border-[oklch(82%_0.014_245)] text-center">
           <div class="max-w-sm">
-            <div class="font-semibold">Candidates loaded</div>
+            <div class="font-semibold">{{ recommendations.length ? "Only skip suggestions found" : "Candidates loaded" }}</div>
             <p class="mt-1 text-sm leading-6 text-[oklch(48%_0.024_245)]">
-              Run DeepSeek analysis to turn these posts into like, comment, or skip recommendations.
+              {{
+                recommendations.length
+                  ? "DeepSeek did not find any like or comment actions worth showing. Adjust the search query or try again later."
+                  : "Run discovery and analysis to turn these posts into like or comment recommendations."
+              }}
             </p>
           </div>
         </div>

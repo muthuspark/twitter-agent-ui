@@ -92,6 +92,36 @@ describe("normalizeRecommendations", () => {
     expect(recommendations[0].draft).toBe("Evals are the bottleneck.");
     expect(recommendations[0].postUrl).toBe("https://x.com/ada/status/123");
   });
+
+  test("hides skip recommendations from the action queue", () => {
+    const recommendations = normalizeRecommendations(
+      [
+        {
+          id: 1,
+          tweet_id: "skip-me",
+          action: "skip",
+          confidence: 95,
+          reason: "Good skip decision.",
+          risk: "low",
+        },
+        {
+          id: 2,
+          tweet_id: "like-me",
+          action: "like",
+          confidence: 75,
+          reason: "Worth a like.",
+          risk: "low",
+        },
+      ],
+      [
+        { id: "skip-me", text: "Skip", author: { screenName: "skip" } },
+        { id: "like-me", text: "Like", author: { screenName: "like" } },
+      ],
+    );
+
+    expect(recommendations).toHaveLength(1);
+    expect(recommendations[0].tweet_id).toBe("like-me");
+  });
 });
 
 describe("growthActionLabel", () => {
