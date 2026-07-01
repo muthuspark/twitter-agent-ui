@@ -80,3 +80,7 @@ Before DeepSeek analyzes new candidates, the backend summarizes recent approved 
 ## Credits
 
 This project uses [`public-clis/twitter-cli`](https://github.com/public-clis/twitter-cli) as the local Twitter/X command-line interface for fetching feeds, searching posts, and executing approved actions.
+
+## License
+
+Apache License 2.0. See [LICENSE](./LICENSE).
