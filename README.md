@@ -2,6 +2,8 @@
 
 Minimal Vue/Vite + FastAPI UI for the installed `twitter` CLI.
 
+![Twitter CLI Workbench UI](./twitui.png)
+
 ## Prerequisites
 
 - `twitter` is installed and authenticated on this machine.
