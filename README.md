@@ -76,3 +76,7 @@ No write action runs automatically. The UI shows the exact command and requires 
 The app records approval and rejection context in the local Growth Mode SQLite database. For each decision it stores the source post, recommendation reason, available comment drafts, selected or edited comment, action, and outcome.
 
 Before DeepSeek analyzes new candidates, the backend summarizes recent approved comments, rejected recommendations, and approved skips, then includes that memory in the DeepSeek request. This lets recommendations adapt toward the comments you approve and away from posts or drafts you skip or reject.
+
+## Credits
+
+This project uses [`public-clis/twitter-cli`](https://github.com/public-clis/twitter-cli) as the local Twitter/X command-line interface for fetching feeds, searching posts, and executing approved actions.
