@@ -6,6 +6,7 @@ import {
   Braces,
   CheckCircle2,
   Clipboard,
+  ExternalLink,
   Heart,
   Home,
   Play,
@@ -25,6 +26,7 @@ import {
   loadWorkbenchCache,
   normalizeResult,
   saveWorkbenchCache,
+  tweetUrl,
 } from "./lib/workbench";
 
 const iconMap = {
@@ -62,11 +64,6 @@ const commandPreview = computed(() =>
 const normalized = computed(() => (result.value ? normalizeResult(result.value) : null));
 
 const tweets = computed(() => (normalized.value?.kind === "tweets" ? normalized.value.items : []));
-
-const selectedTweet = computed(() => {
-  if (!tweets.value.length) return null;
-  return tweets.value.find((tweet) => tweet.id === selectedTweetId.value) ?? tweets.value[0];
-});
 
 const rawJson = computed(() => JSON.stringify(result.value?.data ?? result.value, null, 2));
 
@@ -261,7 +258,7 @@ onMounted(async () => {
 
       <main
         v-if="activeTab === 'workbench'"
-        class="grid min-h-[calc(100vh-112px)] overflow-hidden rounded-lg border border-[oklch(85%_0.012_245)] bg-[oklch(98%_0.004_245)] shadow-sm lg:grid-cols-[260px_minmax(0,1fr)_340px]"
+        class="grid min-h-[calc(100vh-112px)] overflow-hidden rounded-lg border border-[oklch(85%_0.012_245)] bg-[oklch(98%_0.004_245)] shadow-sm lg:grid-cols-[260px_minmax(0,1fr)]"
       >
         <aside class="border-b border-[oklch(87%_0.011_245)] bg-[oklch(94%_0.007_245)] p-4 lg:border-b-0 lg:border-r">
           <div class="mb-3 text-xs font-semibold uppercase tracking-[0.08em] text-[oklch(47%_0.024_245)]">
@@ -391,7 +388,7 @@ onMounted(async () => {
                 :key="tweet.id"
                 class="cursor-pointer rounded-md border bg-[oklch(99%_0.004_245)] p-4 transition hover:border-[oklch(74%_0.07_245)]"
                 :class="
-                  selectedTweet?.id === tweet.id
+                  selectedTweetId === tweet.id
                     ? 'border-[oklch(66%_0.1_245)]'
                     : 'border-[oklch(86%_0.012_245)]'
                 "
@@ -430,21 +427,34 @@ onMounted(async () => {
                       <span>{{ formatMetric(tweet.metrics?.views) }} views</span>
                       <span v-if="tweet.media?.length">{{ tweet.media.length }} media</span>
                     </div>
-                    <button
-                      class="mt-3 inline-flex h-8 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-semibold hover:bg-[oklch(94%_0.007_245)] disabled:cursor-not-allowed disabled:opacity-55"
-                      :disabled="tweetActionLoadingId === tweet.id || likedTweetIds.has(tweet.id)"
-                      type="button"
-                      @click.stop="likeTweet(tweet)"
-                    >
-                      <Heart :size="15" aria-hidden="true" />
-                      {{
-                        likedTweetIds.has(tweet.id)
-                          ? "Liked"
-                          : tweetActionLoadingId === tweet.id
-                            ? "Liking"
-                            : "Like Post"
-                      }}
-                    </button>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      <button
+                        class="inline-flex h-8 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-semibold hover:bg-[oklch(94%_0.007_245)] disabled:cursor-not-allowed disabled:opacity-55"
+                        :disabled="tweetActionLoadingId === tweet.id || likedTweetIds.has(tweet.id)"
+                        type="button"
+                        @click.stop="likeTweet(tweet)"
+                      >
+                        <Heart :size="15" aria-hidden="true" />
+                        {{
+                          likedTweetIds.has(tweet.id)
+                            ? "Liked"
+                            : tweetActionLoadingId === tweet.id
+                              ? "Liking"
+                              : "Like Post"
+                        }}
+                      </button>
+                      <a
+                        v-if="tweetUrl(tweet)"
+                        class="inline-flex h-8 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-semibold hover:bg-[oklch(94%_0.007_245)]"
+                        :href="tweetUrl(tweet)"
+                        rel="noreferrer"
+                        target="_blank"
+                        @click.stop
+                      >
+                        <ExternalLink :size="15" aria-hidden="true" />
+                        Link
+                      </a>
+                    </div>
                   </div>
                 </div>
               </article>
@@ -468,47 +478,6 @@ onMounted(async () => {
             </div>
           </div>
         </section>
-
-        <aside class="border-t border-[oklch(87%_0.011_245)] bg-[oklch(96%_0.006_245)] p-4 lg:border-l lg:border-t-0">
-          <div class="mb-3 text-xs font-semibold uppercase tracking-[0.08em] text-[oklch(47%_0.024_245)]">
-            Inspector
-          </div>
-          <div v-if="selectedTweet" class="grid gap-4">
-            <div class="rounded-md border border-[oklch(84%_0.014_245)] bg-[oklch(99%_0.004_245)] p-3">
-              <div class="text-sm font-semibold">{{ selectedTweet.author?.name }}</div>
-              <div class="text-sm text-[oklch(48%_0.024_245)]">@{{ selectedTweet.author?.screenName }}</div>
-              <dl class="mt-3 grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <dt class="text-xs text-[oklch(48%_0.024_245)]">Likes</dt>
-                  <dd class="font-semibold">{{ formatMetric(selectedTweet.metrics?.likes) }}</dd>
-                </div>
-                <div>
-                  <dt class="text-xs text-[oklch(48%_0.024_245)]">Views</dt>
-                  <dd class="font-semibold">{{ formatMetric(selectedTweet.metrics?.views) }}</dd>
-                </div>
-                <div>
-                  <dt class="text-xs text-[oklch(48%_0.024_245)]">Bookmarks</dt>
-                  <dd class="font-semibold">{{ formatMetric(selectedTweet.metrics?.bookmarks) }}</dd>
-                </div>
-                <div>
-                  <dt class="text-xs text-[oklch(48%_0.024_245)]">Language</dt>
-                  <dd class="font-semibold">{{ selectedTweet.lang || "n/a" }}</dd>
-                </div>
-              </dl>
-            </div>
-            <div class="rounded-md border border-[oklch(84%_0.014_245)] bg-[oklch(99%_0.004_245)] p-3">
-              <div class="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[oklch(47%_0.024_245)]">
-                Tweet JSON
-              </div>
-              <pre class="max-h-[420px] overflow-auto font-mono text-xs leading-5">{{
-                JSON.stringify(selectedTweet, null, 2)
-              }}</pre>
-            </div>
-          </div>
-          <div v-else class="rounded-md border border-dashed border-[oklch(82%_0.014_245)] p-4 text-sm text-[oklch(48%_0.024_245)]">
-            Select a tweet to inspect its raw fields, metrics, media, and author data.
-          </div>
-        </aside>
       </main>
       <GrowthMode v-else />
     </div>

@@ -142,6 +142,12 @@ describe("tweetUrl", () => {
       "https://x.com/ada/status/123",
     );
   });
+
+  test("uses author username when screen name is unavailable", () => {
+    expect(tweetUrl({ id: "123", author: { username: "ada" } })).toBe(
+      "https://x.com/ada/status/123",
+    );
+  });
 });
 
 describe("buildRecommendationMetadata", () => {
