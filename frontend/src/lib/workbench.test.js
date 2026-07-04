@@ -2,9 +2,13 @@ import { describe, expect, test } from "vitest";
 
 import {
   buildCommandPreview,
+  buildGrowthActionPayload,
+  buildTweetLikePayload,
   combinedGrowthButtonState,
   buildRecommendationMetadata,
   formatMetric,
+  loadWorkbenchCache,
+  saveWorkbenchCache,
   growthActionLabel,
   normalizeRecommendations,
   normalizeResult,
@@ -156,6 +160,112 @@ describe("buildRecommendationMetadata", () => {
     expect(metadata.source_tweet.text).toBe("AI agents need evals");
     expect(metadata.recommendation_reason).toBe("Relevant technical discussion.");
     expect(metadata.comment_drafts).toEqual(["First", "Second", "Third"]);
+  });
+});
+
+describe("buildGrowthActionPayload", () => {
+  test("builds a direct like payload from a rendered recommendation", () => {
+    const payload = buildGrowthActionPayload(
+      {
+        id: 9,
+        action: "comment",
+        tweet_id: "123",
+        draft: "Useful point",
+        reason: "Relevant technical discussion.",
+        draftOptions: ["Useful point"],
+        tweet: {
+          id: "123",
+          text: "AI agents need evals",
+          author: { screenName: "ada" },
+        },
+      },
+      "like",
+    );
+
+    expect(payload).toEqual({
+      recommendation_id: 9,
+      action: "like",
+      tweet_id: "123",
+      comment_text: "",
+      metadata: {
+        source_tweet: {
+          id: "123",
+          text: "AI agents need evals",
+          author: { screenName: "ada" },
+          metrics: {},
+          createdAtISO: "",
+          sourceQuery: "",
+        },
+        recommendation_reason: "Relevant technical discussion.",
+        comment_drafts: ["Useful point"],
+      },
+    });
+  });
+});
+
+describe("buildTweetLikePayload", () => {
+  test("builds a direct like payload from a plain workbench tweet", () => {
+    const payload = buildTweetLikePayload({
+      id: "feed-123",
+      text: "Shipping local agents",
+      author: { screenName: "ada" },
+      metrics: { likes: 4 },
+      createdAtISO: "2026-07-04T04:00:00.000Z",
+    });
+
+    expect(payload).toEqual({
+      action: "like",
+      tweet_id: "feed-123",
+      comment_text: "",
+      metadata: {
+        source_tweet: {
+          id: "feed-123",
+          text: "Shipping local agents",
+          author: { screenName: "ada" },
+          metrics: { likes: 4 },
+          createdAtISO: "2026-07-04T04:00:00.000Z",
+          sourceQuery: "",
+        },
+        recommendation_reason: "",
+        comment_drafts: [],
+      },
+    });
+  });
+});
+
+describe("workbench cache", () => {
+  test("round-trips the last rendered workbench result", () => {
+    const values = new Map();
+    const storage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+    };
+    const cachedState = {
+      selectedPresetId: "feed",
+      options: { max: 20 },
+      result: {
+        ok: true,
+        command: ["twitter", "feed", "--max", "20", "--json"],
+        data: { data: [{ id: "feed-123", text: "Shipping local agents" }] },
+      },
+      selectedTweetId: "feed-123",
+      rawVisible: false,
+      lastRunMs: 321,
+      likedTweetIds: ["feed-123"],
+    };
+
+    saveWorkbenchCache(storage, cachedState);
+
+    expect(loadWorkbenchCache(storage)).toEqual(cachedState);
+  });
+
+  test("ignores invalid cached workbench state", () => {
+    const storage = {
+      getItem: () => "{not-json",
+      setItem: () => {},
+    };
+
+    expect(loadWorkbenchCache(storage)).toBeNull();
   });
 });
 

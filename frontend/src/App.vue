@@ -6,6 +6,7 @@ import {
   Braces,
   CheckCircle2,
   Clipboard,
+  Heart,
   Home,
   Play,
   RefreshCw,
@@ -17,10 +18,13 @@ import { computed, onMounted, ref, watch } from "vue";
 import GrowthMode from "./components/GrowthMode.vue";
 import {
   buildCommandPreview,
+  buildTweetLikePayload,
   defaultOptionsForPreset,
   formatDate,
   formatMetric,
+  loadWorkbenchCache,
   normalizeResult,
+  saveWorkbenchCache,
 } from "./lib/workbench";
 
 const iconMap = {
@@ -39,10 +43,13 @@ const bootLoading = ref(true);
 const error = ref("");
 const result = ref(null);
 const selectedTweetId = ref(null);
+const tweetActionLoadingId = ref(null);
+const likedTweetIds = ref(new Set());
 const rawVisible = ref(false);
 const lastRunMs = ref(null);
 const copied = ref(false);
 const activeTab = ref("workbench");
+const cacheReady = ref(false);
 
 const selectedPreset = computed(() =>
   presets.value.find((preset) => preset.id === selectedPresetId.value),
@@ -63,12 +70,13 @@ const selectedTweet = computed(() => {
 
 const rawJson = computed(() => JSON.stringify(result.value?.data ?? result.value, null, 2));
 
-watch(selectedPreset, (preset) => {
-  if (preset) {
-    options.value = defaultOptionsForPreset(preset);
-    error.value = "";
-  }
-});
+watch(
+  [selectedPresetId, options, result, selectedTweetId, rawVisible, lastRunMs, likedTweetIds],
+  () => {
+    if (cacheReady.value) persistWorkbenchCache();
+  },
+  { deep: true },
+);
 
 async function loadPresets() {
   bootLoading.value = true;
@@ -84,6 +92,13 @@ async function loadPresets() {
   } finally {
     bootLoading.value = false;
   }
+}
+
+function selectPreset(presetId) {
+  selectedPresetId.value = presetId;
+  const preset = presets.value.find((entry) => entry.id === presetId);
+  options.value = defaultOptionsForPreset(preset);
+  error.value = "";
 }
 
 async function runCommand() {
@@ -110,6 +125,7 @@ async function runCommand() {
     const normalizedBody = normalizeResult(body);
     selectedTweetId.value = normalizedBody.kind === "tweets" ? normalizedBody.items[0]?.id : null;
     lastRunMs.value = Math.round(performance.now() - startedAt);
+    persistWorkbenchCache();
   } catch (failure) {
     error.value = failure.message;
   } finally {
@@ -125,9 +141,61 @@ async function copyCommand() {
   }, 1600);
 }
 
+async function likeTweet(tweet) {
+  if (!tweet?.id || tweetActionLoadingId.value) return;
+  tweetActionLoadingId.value = tweet.id;
+  error.value = "";
+  try {
+    const response = await fetch("/api/growth/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildTweetLikePayload(tweet)),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.detail || "Unable to like post");
+    likedTweetIds.value = new Set([...likedTweetIds.value, tweet.id]);
+    persistWorkbenchCache();
+  } catch (failure) {
+    error.value = failure.message;
+  } finally {
+    tweetActionLoadingId.value = null;
+  }
+}
+
+function currentWorkbenchCacheState() {
+  return {
+    selectedPresetId: selectedPresetId.value,
+    options: options.value,
+    result: result.value,
+    selectedTweetId: selectedTweetId.value,
+    rawVisible: rawVisible.value,
+    lastRunMs: lastRunMs.value,
+    likedTweetIds: [...likedTweetIds.value],
+  };
+}
+
+function persistWorkbenchCache() {
+  saveWorkbenchCache(window.localStorage, currentWorkbenchCacheState());
+}
+
+function restoreWorkbenchCache() {
+  const cached = loadWorkbenchCache(window.localStorage);
+  if (!cached) return false;
+  selectedPresetId.value = cached.selectedPresetId;
+  options.value = cached.options;
+  result.value = cached.result;
+  selectedTweetId.value = cached.selectedTweetId;
+  rawVisible.value = cached.rawVisible;
+  lastRunMs.value = cached.lastRunMs;
+  likedTweetIds.value = new Set(cached.likedTweetIds);
+  return true;
+}
+
 onMounted(async () => {
   await loadPresets();
-  if (!error.value) {
+  const restored = restoreWorkbenchCache();
+  cacheReady.value = true;
+  if (!error.value && !restored) {
     await runCommand();
   }
 });
@@ -210,7 +278,7 @@ onMounted(async () => {
                   : 'border-transparent bg-transparent text-[oklch(35%_0.02_245)]'
               "
               type="button"
-              @click="selectedPresetId = preset.id"
+              @click="selectPreset(preset.id)"
             >
               <component :is="iconMap[preset.id] || Braces" :size="17" aria-hidden="true" />
               <span>
@@ -362,6 +430,21 @@ onMounted(async () => {
                       <span>{{ formatMetric(tweet.metrics?.views) }} views</span>
                       <span v-if="tweet.media?.length">{{ tweet.media.length }} media</span>
                     </div>
+                    <button
+                      class="mt-3 inline-flex h-8 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-semibold hover:bg-[oklch(94%_0.007_245)] disabled:cursor-not-allowed disabled:opacity-55"
+                      :disabled="tweetActionLoadingId === tweet.id || likedTweetIds.has(tweet.id)"
+                      type="button"
+                      @click.stop="likeTweet(tweet)"
+                    >
+                      <Heart :size="15" aria-hidden="true" />
+                      {{
+                        likedTweetIds.has(tweet.id)
+                          ? "Liked"
+                          : tweetActionLoadingId === tweet.id
+                            ? "Liking"
+                            : "Like Post"
+                      }}
+                    </button>
                   </div>
                 </div>
               </article>

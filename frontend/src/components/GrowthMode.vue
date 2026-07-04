@@ -3,6 +3,7 @@ import {
   AlertCircle,
   CheckCircle2,
   ExternalLink,
+  Heart,
   History,
   Search,
   ShieldCheck,
@@ -12,6 +13,7 @@ import {
 import { computed, onMounted, ref } from "vue";
 
 import {
+  buildGrowthActionPayload,
   buildRecommendationMetadata,
   combinedGrowthButtonState,
   formatDate,
@@ -129,13 +131,21 @@ async function approve(item) {
   actionLoadingId.value = item.id;
   error.value = "";
   try {
-    await requestJson("/api/growth/approve", {
-      recommendation_id: item.id,
-      action: item.action,
-      tweet_id: item.tweet_id,
-      comment_text: item.draft,
-      metadata: buildRecommendationMetadata(item),
-    });
+    await requestJson("/api/growth/approve", buildGrowthActionPayload(item));
+    recommendations.value = recommendations.value.filter((entry) => entry.id !== item.id);
+    await loadHistory();
+  } catch (failure) {
+    error.value = failure.message;
+  } finally {
+    actionLoadingId.value = null;
+  }
+}
+
+async function likePost(item) {
+  actionLoadingId.value = item.id;
+  error.value = "";
+  try {
+    await requestJson("/api/growth/approve", buildGrowthActionPayload(item, "like"));
     recommendations.value = recommendations.value.filter((entry) => entry.id !== item.id);
     await loadHistory();
   } catch (failure) {
@@ -341,6 +351,27 @@ onMounted(loadHistory);
 
             <div class="mt-4 flex flex-wrap gap-2">
               <button
+                v-if="item.action === 'like'"
+                class="inline-flex h-9 items-center gap-2 rounded-md bg-[oklch(58%_0.13_245)] px-3 text-sm font-semibold text-[oklch(98%_0.004_245)] hover:bg-[oklch(52%_0.14_245)] disabled:cursor-not-allowed disabled:opacity-55"
+                :disabled="actionLoadingId === item.id"
+                type="button"
+                @click="approve(item)"
+              >
+                <Heart :size="16" aria-hidden="true" />
+                Like Post
+              </button>
+              <button
+                v-else
+                class="inline-flex h-9 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-semibold hover:bg-[oklch(94%_0.007_245)] disabled:cursor-not-allowed disabled:opacity-55"
+                :disabled="actionLoadingId === item.id"
+                type="button"
+                @click="likePost(item)"
+              >
+                <Heart :size="16" aria-hidden="true" />
+                Like Post
+              </button>
+              <button
+                v-if="item.action !== 'like'"
                 class="inline-flex h-9 items-center gap-2 rounded-md bg-[oklch(58%_0.13_245)] px-3 text-sm font-semibold text-[oklch(98%_0.004_245)] hover:bg-[oklch(52%_0.14_245)] disabled:cursor-not-allowed disabled:opacity-55"
                 :disabled="actionLoadingId === item.id"
                 type="button"

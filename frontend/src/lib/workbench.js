@@ -6,6 +6,8 @@ const COMMAND_LABELS = {
   whoami: "whoami",
 };
 
+const WORKBENCH_CACHE_KEY = "twitter-agent-ui:workbench-cache:v1";
+
 export function shellQuote(value) {
   const text = String(value ?? "");
   return `"${text.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
@@ -123,6 +125,71 @@ export function buildRecommendationMetadata(item) {
     recommendation_reason: item?.reason ?? "",
     comment_drafts: item?.draftOptions ?? [],
   };
+}
+
+export function buildGrowthActionPayload(item, action = item?.action ?? "skip") {
+  return {
+    recommendation_id: item?.id,
+    action,
+    tweet_id: item?.tweet_id,
+    comment_text: action === "comment" ? item?.draft ?? "" : "",
+    metadata: buildRecommendationMetadata(item),
+  };
+}
+
+export function buildTweetLikePayload(tweet) {
+  return {
+    action: "like",
+    tweet_id: tweet?.id,
+    comment_text: "",
+    metadata: {
+      source_tweet: {
+        id: tweet?.id ?? "",
+        text: tweet?.text ?? "",
+        author: tweet?.author ?? {},
+        metrics: tweet?.metrics ?? {},
+        createdAtISO: tweet?.createdAtISO ?? tweet?.createdAtLocal ?? "",
+        sourceQuery: tweet?.sourceQuery ?? "",
+      },
+      recommendation_reason: "",
+      comment_drafts: [],
+    },
+  };
+}
+
+export function saveWorkbenchCache(storage, state) {
+  if (!storage) return;
+  storage.setItem(
+    WORKBENCH_CACHE_KEY,
+    JSON.stringify({
+      selectedPresetId: state?.selectedPresetId ?? "feed",
+      options: state?.options ?? {},
+      result: state?.result ?? null,
+      selectedTweetId: state?.selectedTweetId ?? null,
+      rawVisible: Boolean(state?.rawVisible),
+      lastRunMs: state?.lastRunMs ?? null,
+      likedTweetIds: Array.isArray(state?.likedTweetIds) ? state.likedTweetIds : [],
+    }),
+  );
+}
+
+export function loadWorkbenchCache(storage) {
+  if (!storage) return null;
+  try {
+    const cached = JSON.parse(storage.getItem(WORKBENCH_CACHE_KEY) ?? "null");
+    if (!cached || typeof cached !== "object" || !cached.result) return null;
+    return {
+      selectedPresetId: cached.selectedPresetId ?? "feed",
+      options: cached.options && typeof cached.options === "object" ? cached.options : {},
+      result: cached.result,
+      selectedTweetId: cached.selectedTweetId ?? null,
+      rawVisible: Boolean(cached.rawVisible),
+      lastRunMs: cached.lastRunMs ?? null,
+      likedTweetIds: Array.isArray(cached.likedTweetIds) ? cached.likedTweetIds : [],
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function combinedGrowthButtonState({ loadingDiscover, loadingAnalyze }) {
