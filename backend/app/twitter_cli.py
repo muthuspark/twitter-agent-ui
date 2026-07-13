@@ -1,9 +1,10 @@
 import json
+import random
 import subprocess
 from dataclasses import dataclass
 from typing import Any
 
-from app.growth import build_growth_action_command
+from app.growth import build_growth_action_command, build_post_command
 
 
 class ValidationError(Exception):
@@ -40,6 +41,25 @@ class PresetDefinition:
 class CliResult:
     command: list[str]
     data: Any
+
+
+JOVIS_SEARCH_QUERIES: tuple[str, ...] = (
+    "data team bottleneck",
+    "waiting on data team",
+    "manual reporting",
+    "chat with database",
+    "ask questions of data",
+    "AI data analyst",
+    "RevOps reporting",
+    "support analytics",
+    "CRM analytics",
+    "business users data",
+    "founder dashboard",
+    "dashboard is outdated",
+    "can't trust dashboard",
+    "spreadsheet reporting",
+    "single source of truth",
+)
 
 
 PRESETS: dict[str, PresetDefinition] = {
@@ -80,6 +100,13 @@ PRESETS: dict[str, PresetDefinition] = {
 }
 
 
+def resolve_search_query(query: Any = None) -> str:
+    text = str(query or "").strip()
+    if text:
+        return text
+    return random.choice(JOVIS_SEARCH_QUERIES)
+
+
 def _coerce_max(value: Any) -> int:
     if value in (None, ""):
         return 20
@@ -101,10 +128,7 @@ def build_command(preset_id: str, options: dict[str, Any] | None = None) -> list
     command = ["twitter", *preset.base_args]
 
     if preset.requires_query:
-        query = str(options.get("query", "")).strip()
-        if not query:
-            raise ValidationError("Search query is required")
-        command.append(query)
+        command.append(resolve_search_query(options.get("query")))
 
     if preset.supports_max:
         command.extend(["--max", str(_coerce_max(options.get("max")))])
@@ -167,4 +191,9 @@ def _run_json_command(command: list[str]) -> CliResult:
 
 def run_growth_action(action: str, tweet_id: str, comment_text: str | None = None) -> CliResult:
     command = build_growth_action_command(action, tweet_id, comment_text)
+    return _run_json_command(command)
+
+
+def run_post_action(post_text: str) -> CliResult:
+    command = build_post_command(post_text)
     return _run_json_command(command)

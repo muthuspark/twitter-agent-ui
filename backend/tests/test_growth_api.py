@@ -35,6 +35,28 @@ def test_growth_discover_returns_candidates(monkeypatch):
     assert body["candidates"][0]["id"] == "123"
 
 
+def test_growth_discover_uses_random_jovis_query_when_query_is_empty(monkeypatch):
+    from app import main
+
+    monkeypatch.setattr(main, "resolve_search_query", lambda query: "data team bottleneck")
+
+    def fake_run(preset, options):
+        assert preset == "search"
+        assert options["query"] == "data team bottleneck"
+        return CliResult(
+            command=["twitter", "search", "data team bottleneck", "--max", "2", "--json"],
+            data={"ok": True, "data": []},
+        )
+
+    monkeypatch.setattr(main, "run_twitter_command", fake_run)
+    client = TestClient(main.app)
+
+    response = client.post("/api/growth/discover", json={"query": "", "max": 2})
+
+    assert response.status_code == 200
+    assert response.json()["command"] == ["twitter", "search", "data team bottleneck", "--max", "2", "--json"]
+
+
 def test_growth_discover_excludes_already_commented_posts(monkeypatch, tmp_path):
     from app import main
 
@@ -256,6 +278,69 @@ def test_growth_approve_skip_records_without_cli_execution(monkeypatch, tmp_path
     assert body["record"]["status"] == "approved"
     assert body["record"]["command"] == []
     assert body["record"]["result"] == {"ok": True, "skipped": True}
+
+
+def test_post_ideas_returns_generated_ideas(monkeypatch, tmp_path):
+    from app import main
+
+    store = main.GrowthStore(tmp_path / "growth.sqlite3")
+
+    def fake_generate(profile_focus, themes, preference_memory=None, count=5):
+        assert "Jovis" in profile_focus
+        assert "CRM" in themes
+        assert preference_memory["summary"] == "No preference memory recorded yet."
+        assert count == 3
+        return [
+            {
+                "title": "CRM answers",
+                "angle": "CRM data is trapped.",
+                "audience": "RevOps",
+                "rationale": "Relevant buyer pain.",
+                "cta": "See Jovis",
+                "post_text": "Your CRM already knows which deals are stuck.",
+            }
+        ]
+
+    monkeypatch.setattr(main, "get_growth_store", lambda: store)
+    monkeypatch.setattr(main, "generate_post_ideas", fake_generate)
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/api/posts/ideas",
+        json={"profile_focus": "Jovis buyers", "themes": "CRM analytics", "count": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ideas"][0]["title"] == "CRM answers"
+
+
+def test_approve_post_executes_post_and_records_history(monkeypatch, tmp_path):
+    from app import main
+
+    store = main.GrowthStore(tmp_path / "growth.sqlite3")
+
+    def fake_run(post_text):
+        assert post_text == "Approved post"
+        return CliResult(command=["twitter", "post", "Approved post", "--json"], data={"ok": True, "id": "post-1"})
+
+    monkeypatch.setattr(main, "get_growth_store", lambda: store)
+    monkeypatch.setattr(main, "run_post_action", fake_run)
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/api/posts/approve",
+        json={
+            "post_text": "Approved post",
+            "metadata": {"post_idea": {"title": "CRM answers"}},
+        },
+    )
+
+    assert response.status_code == 200
+    record = response.json()["record"]
+    assert record["action"] == "post"
+    assert record["tweet_id"] == "post-1"
+    assert record["comment_text"] == "Approved post"
+    assert record["metadata"]["post_idea"]["title"] == "CRM answers"
 
 
 def test_growth_reject_records_without_cli_execution(monkeypatch, tmp_path):

@@ -22,8 +22,8 @@ import {
   normalizeRecommendations,
 } from "../lib/workbench";
 
-const defaultQuery = "AI agents startups software engineering founder";
-const profileFocus = ref("AI, startups, software engineering, and personal brand");
+const defaultQuery = "";
+const profileFocus = ref("Jovis.ai target customers: founders, RevOps, sales ops, support ops, and business teams trying to get answers from live business data without waiting on SQL, dashboards, or data teams");
 const query = ref(defaultQuery);
 const maxResults = ref(12);
 const candidates = ref([]);
@@ -199,6 +199,7 @@ onMounted(loadHistory);
           <textarea
             v-model="query"
             class="min-h-24 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 py-2 leading-5"
+            placeholder="Leave empty to rotate through Jovis target-customer searches"
           ></textarea>
         </label>
         <label class="grid gap-1.5 text-sm">

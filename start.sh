@@ -7,6 +7,10 @@ BACKEND_PORT="${BACKEND_PORT:-8010}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 HOST="${HOST:-127.0.0.1}"
 FRONTEND_HOST="${FRONTEND_HOST:-0.0.0.0}"
+PYTHON_BIN="${PYTHON:-python3}"
+if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
+fi
 
 mkdir -p "$RUN_DIR"
 
@@ -27,8 +31,8 @@ start_backend() {
   rm -f "$pid_file"
   setsid bash -c '
     cd "$1"
-    exec python3 -m uvicorn app.main:app --app-dir backend --host "$2" --port "$3"
-  ' _ "$ROOT_DIR" "$HOST" "$BACKEND_PORT" >"$log_file" 2>&1 &
+    exec "$2" -m uvicorn app.main:app --app-dir backend --host "$3" --port "$4"
+  ' _ "$ROOT_DIR" "$PYTHON_BIN" "$HOST" "$BACKEND_PORT" >"$log_file" 2>&1 &
 
   echo $! > "$pid_file"
   echo "Backend started: http://$HOST:$BACKEND_PORT (pid $(cat "$pid_file"))"

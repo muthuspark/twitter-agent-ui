@@ -7,6 +7,7 @@ import {
   combinedGrowthButtonState,
   buildRecommendationMetadata,
   formatMetric,
+  getTweetsUnderLikeThreshold,
   loadWorkbenchCache,
   saveWorkbenchCache,
   growthActionLabel,
@@ -132,6 +133,7 @@ describe("growthActionLabel", () => {
   test("formats supported action labels", () => {
     expect(growthActionLabel("like")).toBe("Like");
     expect(growthActionLabel("comment")).toBe("Comment");
+    expect(growthActionLabel("post")).toBe("Post");
     expect(growthActionLabel("skip")).toBe("Skip");
   });
 });
@@ -236,6 +238,22 @@ describe("buildTweetLikePayload", () => {
         comment_drafts: [],
       },
     });
+  });
+});
+
+describe("getTweetsUnderLikeThreshold", () => {
+  test("returns loaded tweets with likes under the threshold that have not already been liked", () => {
+    const tweets = [
+      { id: "under", metrics: { likes: 19 } },
+      { id: "at-limit", metrics: { likes: 20 } },
+      { id: "liked", metrics: { likes: 3 } },
+      { id: "", metrics: { likes: 2 } },
+      { id: "unknown-likes", metrics: {} },
+    ];
+
+    expect(getTweetsUnderLikeThreshold(tweets, new Set(["liked"]), 20)).toEqual([
+      { id: "under", metrics: { likes: 19 } },
+    ]);
   });
 });
 

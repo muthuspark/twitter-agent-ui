@@ -18,7 +18,8 @@ export function buildCommandPreview(preset, options = {}) {
 
   const parts = ["twitter", COMMAND_LABELS[preset.id] ?? preset.id];
   if (preset.id === "search") {
-    parts.push(shellQuote(options.query ?? ""));
+    const query = String(options.query ?? "").trim();
+    parts.push(query ? shellQuote(query) : "<random Jovis query>");
   }
 
   const maxField = preset.fields?.find((field) => field.name === "max");
@@ -77,6 +78,7 @@ export function growthActionLabel(action) {
   const labels = {
     like: "Like",
     comment: "Comment",
+    post: "Post",
     skip: "Skip",
   };
   return labels[action] ?? "Review";
@@ -155,6 +157,14 @@ export function buildTweetLikePayload(tweet) {
       comment_drafts: [],
     },
   };
+}
+
+export function getTweetsUnderLikeThreshold(tweets = [], likedTweetIds = new Set(), threshold = 20) {
+  return tweets.filter((tweet) => {
+    if (!tweet?.id || likedTweetIds.has(tweet.id)) return false;
+    const likes = Number(tweet?.metrics?.likes);
+    return Number.isFinite(likes) && likes < threshold;
+  });
 }
 
 export function saveWorkbenchCache(storage, state) {

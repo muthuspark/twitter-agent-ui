@@ -16,13 +16,16 @@ import {
 } from "@lucide/vue";
 import { computed, onMounted, ref, watch } from "vue";
 
+import AnalyticsDashboard from "./components/AnalyticsDashboard.vue";
 import GrowthMode from "./components/GrowthMode.vue";
+import PostIdeas from "./components/PostIdeas.vue";
 import {
   buildCommandPreview,
   buildTweetLikePayload,
   defaultOptionsForPreset,
   formatDate,
   formatMetric,
+  getTweetsUnderLikeThreshold,
   loadWorkbenchCache,
   normalizeResult,
   saveWorkbenchCache,
@@ -46,6 +49,9 @@ const error = ref("");
 const result = ref(null);
 const selectedTweetId = ref(null);
 const tweetActionLoadingId = ref(null);
+const bulkLikeLoading = ref(false);
+const bulkLikeCompleted = ref(0);
+const bulkLikeTotal = ref(0);
 const likedTweetIds = ref(new Set());
 const rawVisible = ref(false);
 const lastRunMs = ref(null);
@@ -64,6 +70,13 @@ const commandPreview = computed(() =>
 const normalized = computed(() => (result.value ? normalizeResult(result.value) : null));
 
 const tweets = computed(() => (normalized.value?.kind === "tweets" ? normalized.value.items : []));
+
+const lowLikeTweets = computed(() => getTweetsUnderLikeThreshold(tweets.value, likedTweetIds.value, 20));
+
+const bulkLikeLabel = computed(() => {
+  if (bulkLikeLoading.value) return `Liking ${bulkLikeCompleted.value}/${bulkLikeTotal.value}`;
+  return `Like <20 (${lowLikeTweets.value.length})`;
+});
 
 const rawJson = computed(() => JSON.stringify(result.value?.data ?? result.value, null, 2));
 
@@ -159,6 +172,38 @@ async function likeTweet(tweet) {
   }
 }
 
+async function likeLoadedLowLikeTweets() {
+  if (bulkLikeLoading.value || tweetActionLoadingId.value || !lowLikeTweets.value.length) return;
+  bulkLikeLoading.value = true;
+  bulkLikeCompleted.value = 0;
+  error.value = "";
+  const likedIds = new Set(likedTweetIds.value);
+  const queue = [...lowLikeTweets.value];
+  bulkLikeTotal.value = queue.length;
+
+  try {
+    for (const tweet of queue) {
+      tweetActionLoadingId.value = tweet.id;
+      const response = await fetch("/api/growth/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildTweetLikePayload(tweet)),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail || "Unable to like post");
+      likedIds.add(tweet.id);
+      likedTweetIds.value = new Set(likedIds);
+      bulkLikeCompleted.value += 1;
+      persistWorkbenchCache();
+    }
+  } catch (failure) {
+    error.value = failure.message;
+  } finally {
+    tweetActionLoadingId.value = null;
+    bulkLikeLoading.value = false;
+  }
+}
+
 function currentWorkbenchCacheState() {
   return {
     selectedPresetId: selectedPresetId.value,
@@ -236,6 +281,22 @@ onMounted(async () => {
               @click="activeTab = 'growth'"
             >
               Growth Mode
+            </button>
+            <button
+              class="h-7 rounded px-3 text-sm font-medium"
+              :class="activeTab === 'postIdeas' ? 'bg-[oklch(90%_0.038_245)] text-[oklch(30%_0.08_245)]' : 'text-[oklch(48%_0.024_245)] hover:bg-[oklch(94%_0.007_245)]'"
+              type="button"
+              @click="activeTab = 'postIdeas'"
+            >
+              Post Ideas
+            </button>
+            <button
+              class="h-7 rounded px-3 text-sm font-medium"
+              :class="activeTab === 'analytics' ? 'bg-[oklch(90%_0.038_245)] text-[oklch(30%_0.08_245)]' : 'text-[oklch(48%_0.024_245)] hover:bg-[oklch(94%_0.007_245)]'"
+              type="button"
+              @click="activeTab = 'analytics'"
+            >
+              Analytics
             </button>
           </div>
           <span
@@ -350,6 +411,15 @@ onMounted(async () => {
             >
               <Clipboard :size="16" aria-hidden="true" />
               {{ copied ? "Copied" : "Copy command" }}
+            </button>
+            <button
+              class="inline-flex h-9 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-medium hover:bg-[oklch(94%_0.007_245)] disabled:cursor-not-allowed disabled:opacity-55"
+              :disabled="loading || bootLoading || bulkLikeLoading || tweetActionLoadingId || !lowLikeTweets.length"
+              type="button"
+              @click="likeLoadedLowLikeTweets"
+            >
+              <Heart :size="16" aria-hidden="true" />
+              {{ bulkLikeLabel }}
             </button>
             <span class="ml-auto text-sm text-[oklch(48%_0.024_245)]" v-if="lastRunMs">
               Last run {{ (lastRunMs / 1000).toFixed(1) }}s
@@ -479,7 +549,9 @@ onMounted(async () => {
           </div>
         </section>
       </main>
-      <GrowthMode v-else />
+      <GrowthMode v-else-if="activeTab === 'growth'" />
+      <PostIdeas v-else-if="activeTab === 'postIdeas'" />
+      <AnalyticsDashboard v-else />
     </div>
   </div>
 </template>

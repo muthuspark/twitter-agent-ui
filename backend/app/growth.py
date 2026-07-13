@@ -45,3 +45,12 @@ def build_growth_action_command(action: str, tweet_id: str, comment_text: str | 
         return ["twitter", "reply", tweet_id, comment, "--json"]
 
     raise GrowthValidationError(f"Unsupported growth action: {action}")
+
+
+def build_post_command(post_text: str) -> list[str]:
+    text = str(post_text or "").strip()
+    if not text:
+        raise GrowthValidationError("Post text is required")
+    if len(text) > 280:
+        raise GrowthValidationError("Post text must be 280 characters or fewer")
+    return ["twitter", "post", text, "--json"]

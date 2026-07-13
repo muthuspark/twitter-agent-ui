@@ -5,9 +5,15 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.analytics import AnalyticsConfigurationError, AnalyticsDataError, fetch_analytics_summary
 from app.config import load_environment
 from app.models import Preset, PresetField, RunRequest, RunResponse
-from app.deepseek_client import DeepSeekConfigurationError, DeepSeekError, analyze_with_deepseek
+from app.deepseek_client import (
+    DeepSeekConfigurationError,
+    DeepSeekError,
+    analyze_with_deepseek,
+    generate_post_ideas_with_deepseek,
+)
 from app.growth import GrowthValidationError, extract_tweet_candidates
 from app.storage import GrowthStore
 from app.twitter_cli import (
@@ -17,7 +23,9 @@ from app.twitter_cli import (
     CliTimeoutError,
     InvalidCliOutputError,
     ValidationError,
+    resolve_search_query,
     run_growth_action,
+    run_post_action,
     run_twitter_command,
 )
 
@@ -51,9 +59,47 @@ def analyze_candidates(
     )
 
 
+def generate_post_ideas(
+    profile_focus: str,
+    themes: str,
+    preference_memory: dict[str, Any] | None = None,
+    count: int = 5,
+) -> list[dict[str, Any]]:
+    return generate_post_ideas_with_deepseek(
+        profile_focus,
+        themes,
+        preference_memory=preference_memory,
+        count=count,
+    )
+
+
 @app.get("/api/health")
 def health() -> dict[str, bool]:
     return {"ok": True}
+
+
+@app.get("/api/analytics/summary")
+def analytics_summary(start_date: str = "28daysAgo", end_date: str = "yesterday") -> dict[str, Any]:
+    try:
+        summary = fetch_analytics_summary(start_date=start_date, end_date=end_date)
+    except AnalyticsConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AnalyticsDataError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {
+        "ok": True,
+        "property_id": os.environ.get("GA4_PROPERTY_ID", ""),
+        "start_date": summary.start_date,
+        "end_date": summary.end_date,
+        "metrics": summary.metrics,
+        "acquisition": summary.acquisition,
+        "pages": summary.pages,
+        "campaigns": summary.campaigns,
+        "landing_pages": summary.landing_pages,
+        "funnel_events": summary.funnel_events,
+        "recommendations": summary.recommendations,
+    }
 
 
 @app.get("/api/presets")
@@ -67,7 +113,7 @@ def presets() -> dict[str, list[Preset]]:
                     name="query",
                     label="Query",
                     type="text",
-                    required=True,
+                    required=False,
                 )
             )
         if preset.supports_max:
@@ -113,9 +159,7 @@ def run_command(request: RunRequest) -> RunResponse:
 
 @app.post("/api/growth/discover")
 def growth_discover(request: dict[str, Any]) -> dict[str, Any]:
-    query = str(request.get("query", "")).strip()
-    if not query:
-        raise HTTPException(status_code=422, detail="Query is required")
+    query = resolve_search_query(request.get("query"))
     max_results = request.get("max", 20)
     try:
         result = run_twitter_command("search", {"query": query, "max": max_results})
@@ -205,6 +249,68 @@ def growth_approve(request: dict[str, Any]) -> dict[str, Any]:
         command=result.command,
         result=result.data,
         metadata=request.get("metadata") if isinstance(request.get("metadata"), dict) else {},
+    )
+    return {"ok": True, "record": record}
+
+
+@app.post("/api/posts/ideas")
+def post_ideas(request: dict[str, Any]) -> dict[str, Any]:
+    profile_focus = str(
+        request.get("profile_focus")
+        or "Jovis.ai target customers who need answers from live business data"
+    )
+    themes = str(
+        request.get("themes")
+        or "data team bottlenecks, manual reporting, CRM analytics, support analytics, RevOps reporting"
+    )
+    count = int(request.get("count", 5) or 5)
+    store = get_growth_store()
+    try:
+        ideas = generate_post_ideas(
+            profile_focus,
+            themes,
+            preference_memory=store.preference_memory(),
+            count=count,
+        )
+    except DeepSeekConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {"ok": True, "ideas": ideas}
+
+
+@app.post("/api/posts/approve")
+def approve_post(request: dict[str, Any]) -> dict[str, Any]:
+    post_text = str(request.get("post_text", "") or "").strip()
+    metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+    try:
+        result = run_post_action(post_text)
+    except GrowthValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CliNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CliTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except (CliExecutionError, InvalidCliOutputError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    result_data = result.data if isinstance(result.data, dict) else {"data": result.data}
+    tweet_id = str(
+        result_data.get("id")
+        or result_data.get("tweet_id")
+        or result_data.get("tweetId")
+        or ""
+    )
+    record = get_growth_store().record_action(
+        recommendation_id=None,
+        action="post",
+        tweet_id=tweet_id,
+        comment_text=post_text,
+        status="approved",
+        command=result.command,
+        result=result_data,
+        metadata=metadata,
     )
     return {"ok": True, "record": record}
 

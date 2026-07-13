@@ -2,14 +2,20 @@ import json
 import sqlite3
 import subprocess
 
-from app.deepseek_client import analyze_with_deepseek, parse_recommendations
+from app.deepseek_client import (
+    analyze_with_deepseek,
+    generate_post_ideas_with_deepseek,
+    parse_post_ideas,
+    parse_recommendations,
+)
 from app.growth import (
     GrowthValidationError,
     build_growth_action_command,
+    build_post_command,
     extract_tweet_candidates,
 )
 from app.storage import GrowthStore
-from app.twitter_cli import run_growth_action
+from app.twitter_cli import run_growth_action, run_post_action
 
 
 def test_extract_tweet_candidates_from_cli_envelope():
@@ -109,6 +115,28 @@ def test_build_growth_action_command_for_comment():
     ]
 
 
+def test_build_post_command_for_original_post():
+    assert build_post_command("New post") == ["twitter", "post", "New post", "--json"]
+
+
+def test_rejects_post_without_text():
+    try:
+        build_post_command(" ")
+    except GrowthValidationError as exc:
+        assert str(exc) == "Post text is required"
+    else:
+        raise AssertionError("Expected GrowthValidationError")
+
+
+def test_rejects_post_over_280_characters():
+    try:
+        build_post_command("x" * 281)
+    except GrowthValidationError as exc:
+        assert str(exc) == "Post text must be 280 characters or fewer"
+    else:
+        raise AssertionError("Expected GrowthValidationError")
+
+
 def test_rejects_comment_without_text():
     try:
         build_growth_action_command("comment", "123", " ")
@@ -129,6 +157,41 @@ def test_run_growth_action_executes_safe_argument_list(monkeypatch):
 
     assert result.command == ["twitter", "like", "123", "--json"]
     assert result.data == {"ok": True}
+
+
+def test_run_post_action_executes_safe_argument_list(monkeypatch):
+    def fake_run(command, capture_output, text, timeout, check):
+        assert command == ["twitter", "post", "Approved post", "--json"]
+        return subprocess.CompletedProcess(command, 0, json.dumps({"ok": True, "id": "post-1"}), "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = run_post_action("Approved post")
+
+    assert result.command == ["twitter", "post", "Approved post", "--json"]
+    assert result.data == {"ok": True, "id": "post-1"}
+
+
+def test_parse_post_ideas_accepts_deepseek_json_shape():
+    parsed = parse_post_ideas(
+        json.dumps(
+            {
+                "ideas": [
+                    {
+                        "title": "Data team bottleneck",
+                        "angle": "Answer latency hurts operators.",
+                        "audience": "Founders",
+                        "rationale": "Specific Jovis buyer pain.",
+                        "cta": "Try Jovis",
+                        "post_text": "Most teams do not have a data problem. They have an answer latency problem.",
+                    }
+                ]
+            }
+        )
+    )
+
+    assert parsed[0]["title"] == "Data team bottleneck"
+    assert parsed[0]["post_text"].startswith("Most teams")
 
 
 def test_growth_store_records_recommendations_and_actions(tmp_path):
@@ -315,3 +378,38 @@ def test_deepseek_request_includes_preference_memory():
 
     user_content = captured["payload"]["messages"][1]["content"]
     assert "User prefers technical replies about evals" in user_content
+
+
+def test_generate_post_ideas_request_includes_jovis_positioning():
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"ideas":[{"title":"CRM answers","angle":"CRM data is trapped","audience":"RevOps","rationale":"High intent","cta":"See Jovis","post_text":"Your CRM already knows which deals are stuck. The hard part is asking the question without rebuilding a dashboard."}]}'
+                        }
+                    }
+                ]
+            }
+
+    def fake_post(url, headers, json, timeout):
+        captured["payload"] = json
+        return FakeResponse()
+
+    ideas = generate_post_ideas_with_deepseek(
+        "Jovis.ai target customers",
+        "CRM analytics",
+        api_key="test-key",
+        post=fake_post,
+        preference_memory={"summary": "User prefers concrete posts."},
+    )
+
+    user_content = captured["payload"]["messages"][1]["content"]
+    assert "Jovis.ai target customers" in user_content
+    assert "CRM analytics" in user_content
+    assert ideas[0]["audience"] == "RevOps"

@@ -9,7 +9,9 @@ from app.twitter_cli import (
     CliTimeoutError,
     InvalidCliOutputError,
     ValidationError,
+    JOVIS_SEARCH_QUERIES,
     build_command,
+    resolve_search_query,
     run_twitter_command,
 )
 
@@ -36,9 +38,18 @@ def test_rejects_out_of_range_max():
         build_command("feed", {"max": 500})
 
 
-def test_rejects_search_without_query():
-    with pytest.raises(ValidationError, match="Search query is required"):
-        build_command("search", {"max": 10})
+def test_builds_search_command_with_random_jovis_query_when_query_is_empty(monkeypatch):
+    monkeypatch.setattr("app.twitter_cli.random.choice", lambda queries: "RevOps reporting")
+
+    command = build_command("search", {"max": 10})
+
+    assert command == ["twitter", "search", "RevOps reporting", "--max", "10", "--json"]
+
+
+def test_resolve_search_query_uses_jovis_target_customer_batch():
+    assert "data team bottleneck" in JOVIS_SEARCH_QUERIES
+    assert "single source of truth" in JOVIS_SEARCH_QUERIES
+    assert resolve_search_query(" chat with database ") == "chat with database"
 
 
 def test_runs_command_and_parses_json(monkeypatch):
