@@ -9,8 +9,8 @@ export default {
         'danger', 'danger-wash', 'danger-rule',
       ].map((name) => [name, `var(--${name})`])),
       fontFamily: {
-        sans: ['"Courier Prime"', '"Courier New"', 'monospace'],
-        mono: ['"Courier Prime"', '"Courier New"', 'monospace'],
+        sans: ['"Cutive Mono"', '"Courier New"', 'monospace'],
+        mono: ['"Cutive Mono"', '"Courier New"', 'monospace'],
       },
     },
   },

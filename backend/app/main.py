@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Path as ApiPath
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.analytics import AnalyticsConfigurationError, AnalyticsDataError, fetch_analytics_summary
@@ -154,6 +154,22 @@ def home_feed(
 ) -> dict[str, Any]:
     try:
         return {"ok": True, **fetch_feed_page(cursor=cursor, limit=limit)}
+    except CliNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CliTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except (CliExecutionError, InvalidCliOutputError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/feed/thread/{tweet_id}")
+def feed_thread(
+    tweet_id: str = ApiPath(pattern=r"^[0-9]{1,30}$"),
+    cursor: str | None = Query(default=None, max_length=4096),
+    limit: int = Query(default=20, ge=1, le=40),
+) -> dict[str, Any]:
+    try:
+        return {"ok": True, **fetch_feed_page(cursor=cursor, limit=limit, tweet_id=tweet_id)}
     except CliNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except CliTimeoutError as exc:

@@ -104,7 +104,8 @@ past approvals guide voice. Drafts still require explicit approval before postin
 
 The Feeds tab reads the authenticated account's actual For you home timeline.
 Scrolling near the bottom loads the next Twitter cursor page, with duplicate post
-IDs removed. Latest posts starts a fresh timeline. The loaded feed stays available
+IDs removed. Each post offers Like, Bookmark, and Open on X. Successful likes
+and bookmarks are recorded with source context for Post Ideas. Latest posts starts a fresh timeline. The loaded feed stays available
 when switching tabs. Photos load lazily; video links open the original post on X.
 
 The public `twitter feed` command drops pagination cursors, so
@@ -117,3 +118,34 @@ Python executable if the `twitter` entry point is not a Python script.
 Scrolling continues while Twitter returns advancing cursors. An exhausted timeline
 shows an end message. Three consecutive pages without new posts pause automatic
 requests and leave a Load more posts button available.
+
+### Feed block list
+
+Select a word or phrase in a post, right-click, and choose **Block**. Matching posts
+are immediately hidden from Feeds, including later pages and quoted post text.
+Matching ignores case and normalizes Unicode and whitespace, with whole-word
+boundaries to avoid matching `AI` inside `said`. Punctuation is matched literally.
+
+The **Block list** panel supports adding phrases manually and removing entries.
+Selections also expose a Block button beneath the post, and Shift+F10 opens the
+selection menu from the keyboard. Escape dismisses it. Preferences are saved in
+this browser's local storage and apply only to this app's Feeds tab. Storage
+failures are shown explicitly, with filtering retained for the current session.
+
+Filtered posts remain available in memory, so removing a term restores matching
+loaded posts in their original order. Automatic paging pauses after three pages
+with no new visible posts, with manual loading still available.
+
+### English-only feed and conversations
+
+Feeds only displays posts marked `en` by Twitter. Other languages and missing or
+unknown language labels are excluded, including quoted post text. This relies on
+Twitter's language labels; the feed adapter preserves the language of quoted posts.
+Language filtering and the block list both apply to newly loaded pages.
+
+Click a feed post or use **View thread** to open its conversation alongside the
+feed. The conversation column has its own scroll area and **Load more replies**
+button. Like, Bookmark, Open on X, text selection, and block-list rules remain
+available. Rapid post changes cancel previous thread requests. On narrow screens,
+the conversation uses the full content width; Close thread returns to the saved
+feed position. Escape closes the thread (or dismisses the text context menu first).

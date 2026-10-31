@@ -13,12 +13,13 @@ import {
   Search,
   User,
 } from "@lucide/vue";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 import AnalyticsDashboard from "./components/AnalyticsDashboard.vue";
 import GrowthMode from "./components/GrowthMode.vue";
 import PostIdeas from "./components/PostIdeas.vue";
 import Feeds from "./components/Feeds.vue";
+import { loadBlockedTerms } from "./lib/blocklist";
 import {
   buildCommandPreview,
   buildTweetActionPayload,
@@ -59,7 +60,19 @@ const rawVisible = ref(false);
 const lastRunMs = ref(null);
 const copied = ref(false);
 const activeTab = ref("workbench");
+const feedsRef = ref(null);
+const feedBlockListOpen = ref(false);
+const blockedTermCount = ref(0);
+try { blockedTermCount.value = loadBlockedTerms(window.localStorage).length; } catch { /* Storage may be unavailable. */ }
 const cacheReady = ref(false);
+
+async function toggleFeedBlockList() {
+  const wasOpen = activeTab.value === "feeds" && feedBlockListOpen.value;
+  activeTab.value = "feeds";
+  feedBlockListOpen.value = !wasOpen;
+  await nextTick();
+  if (feedBlockListOpen.value) await feedsRef.value?.closeThread();
+}
 
 const selectedPreset = computed(() =>
   presets.value.find((preset) => preset.id === selectedPresetId.value),
@@ -309,6 +322,17 @@ onMounted(async () => {
               @click="activeTab = 'analytics'"
             >
               Analytics
+            </button>
+            <button
+              id="feed-block-list-toggle"
+              class="manuscript-tab feed-block-nav-button"
+              :class="{ 'font-bold text-ink': activeTab === 'feeds' && feedBlockListOpen }"
+              :aria-expanded="activeTab === 'feeds' && feedBlockListOpen"
+              aria-controls="feed-block-list"
+              type="button"
+              @click="toggleFeedBlockList"
+            >
+              Block list ({{ blockedTermCount }})
             </button>
         </nav>
         <div class="manuscript-header-actions">
@@ -565,7 +589,7 @@ onMounted(async () => {
       <PostIdeas v-else-if="activeTab === 'postIdeas'" />
       <AnalyticsDashboard v-else-if="activeTab === 'analytics'" />
       <KeepAlive>
-        <Feeds v-if="activeTab === 'feeds'" />
+        <Feeds v-if="activeTab === 'feeds'" ref="feedsRef" :block-list-open="feedBlockListOpen" @block-list-count="blockedTermCount = $event" />
       </KeepAlive>
     </div>
   </div>

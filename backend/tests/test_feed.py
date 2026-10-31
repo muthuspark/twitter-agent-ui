@@ -6,7 +6,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import feed, main
-from app.feed_bridge import fetch_page
+from app.feed_bridge import fetch_page, serialize_feed_tweet
+
+
+def test_feed_serialization_preserves_quote_language_for_filtering():
+    tweet = SimpleNamespace(quoted_tweet=SimpleNamespace(lang="hi"))
+    serialized = serialize_feed_tweet(tweet, lambda _: {"lang": "en", "quotedTweet": {"text": "नमस्ते"}})
+    assert serialized["quotedTweet"]["lang"] == "hi"
 from app.twitter_cli import CliExecutionError, CliNotFoundError, CliTimeoutError, InvalidCliOutputError
 
 
@@ -32,6 +38,44 @@ def test_bridge_rejects_changed_upstream_shape():
     client = SimpleNamespace(_graphql_get=lambda *args: {"data": {}})
     with pytest.raises(ValueError, match="unrecognized"):
         fetch_page(client, None, 20, parse_timeline=None, serialize=None, features={})
+
+
+@pytest.mark.parametrize("shape", ["tweetResult", "threaded_conversation_with_injections_v2"])
+def test_thread_bridge_requests_conversation_and_preserves_pagination(shape):
+    captured = {}
+
+    class Client:
+        def _graphql_get(self, operation, variables, features, field_toggles):
+            captured.update(operation=operation, variables=variables, toggles=field_toggles)
+            data = {"tweetResult": {"result": {"timeline": {"instructions": []}}}} if shape == "tweetResult" else {shape: {"instructions": []}}
+            return {"data": data}
+
+    def parse(payload, get_instructions):
+        assert get_instructions(payload) == []
+        return [SimpleNamespace(id="123"), SimpleNamespace(id="456")], "next-thread-page"
+
+    page = fetch_page(Client(), "thread-cursor", 20, tweet_id="123", parse_timeline=parse, serialize=lambda tweet: {"id": tweet.id}, features={})
+    assert captured["operation"] == "TweetDetail"
+    assert captured["variables"]["focalTweetId"] == "123"
+    assert captured["variables"]["cursor"] == "thread-cursor"
+    assert "latestControlAvailable" not in captured["variables"]
+    assert captured["toggles"]["withArticleRichContentState"] is True
+    assert page["next_cursor"] == "next-thread-page"
+
+
+def test_thread_api_passes_post_and_cursor_and_rejects_invalid_ids(monkeypatch):
+    def fetch(cursor, limit, tweet_id):
+        assert tweet_id == "123"
+        assert cursor == "reply-cursor"
+        return {"tweets": [{"id": "123"}, {"id": "456"}], "next_cursor": "next", "has_more": True}
+
+    monkeypatch.setattr(main, "fetch_feed_page", fetch)
+    client = TestClient(main.app)
+    response = client.get("/api/feed/thread/123", params={"cursor": "reply-cursor"})
+    assert response.status_code == 200
+    assert len(response.json()["tweets"]) == 2
+    assert client.get("/api/feed/thread/not-a-post").status_code == 422
+    assert client.get("/api/feed/thread/123?limit=100").status_code == 422
 
 
 def test_feed_runner_sends_cursor_over_stdin(monkeypatch):

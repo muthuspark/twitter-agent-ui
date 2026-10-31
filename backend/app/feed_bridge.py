@@ -9,21 +9,49 @@ import json
 import sys
 
 
-def fetch_page(client, cursor, count, *, parse_timeline, serialize, features):
+def serialize_feed_tweet(tweet, serialize):
+    data = serialize(tweet)
+    # The CLI serializer omits the quote's language. Preserve it so an
+    # English outer post cannot introduce non-English quoted text.
+    quote = getattr(tweet, "quoted_tweet", None)
+    if quote and data.get("quotedTweet"):
+        data["quotedTweet"]["lang"] = quote.lang
+    return data
+
+
+def fetch_page(client, cursor, count, *, parse_timeline, serialize, features, tweet_id=None):
     variables = {
         "count": count,
         "includePromotedContent": False,
         "latestControlAvailable": True,
         "requestContext": "launch",
     }
+    if tweet_id:
+        variables = {
+            "count": count, "focalTweetId": tweet_id, "referrer": "tweet",
+            "with_rux_injections": False, "includePromotedContent": True,
+            "rankingMode": "Relevance", "withCommunity": True,
+            "withQuickPromoteEligibilityTweetFields": True,
+            "withBirdwatchNotes": True, "withVoice": True,
+        }
     if cursor:
         variables["cursor"] = cursor
-    payload = client._graphql_get("HomeTimeline", variables, features)
-    instructions = payload.get("data", {}).get("home", {}).get("home_timeline_urt", {}).get("instructions")
+    if tweet_id:
+        payload = client._graphql_get("TweetDetail", variables, features, field_toggles={
+            "withArticleRichContentState": True, "withArticlePlainText": False,
+            "withGrokAnalyze": False, "withDisallowedReplyControls": False,
+        })
+        data = payload.get("data") or {}
+        instructions = (((data.get("tweetResult") or {}).get("result") or {}).get("timeline") or {}).get("instructions")
+        if instructions is None:
+            instructions = (data.get("threaded_conversation_with_injections_v2") or {}).get("instructions")
+    else:
+        payload = client._graphql_get("HomeTimeline", variables, features)
+        instructions = payload.get("data", {}).get("home", {}).get("home_timeline_urt", {}).get("instructions")
     if not isinstance(instructions, list):
         raise ValueError("Twitter returned an unrecognized home timeline response")
     tweets, next_cursor = parse_timeline(payload, lambda _: instructions)
-    unique = {str(tweet.id): serialize(tweet) for tweet in tweets if tweet.id}
+    unique = {str(tweet.id): serialize_feed_tweet(tweet, serialize) for tweet in tweets if tweet.id}
     next_cursor = next_cursor if next_cursor and next_cursor != cursor else None
     return {"tweets": list(unique.values()), "next_cursor": next_cursor, "has_more": bool(next_cursor)}
 
@@ -45,6 +73,7 @@ def main():
             page = fetch_page(
                 client, request.get("cursor"), request["limit"],
                 parse_timeline=parse_timeline_response, serialize=tweet_to_dict, features=FEATURES,
+                tweet_id=request.get("tweet_id"),
             )
         json.dump(page, sys.stdout)
     except Exception as exc:

@@ -1,5 +1,51 @@
 import { describe, expect, it } from "vitest";
-import { mergeFeedPage, safeMediaUrl } from "./feed";
+import { isEnglishFeedPost, mergeFeedPage, safeMediaUrl, submitFeedAction } from "./feed";
+
+describe("English-only feed", () => {
+  it("accepts English-labelled posts", () => {
+    expect(isEnglishFeedPost({ lang: "en", text: "Hello" })).toBe(true);
+    expect(isEnglishFeedPost({ lang: " EN " })).toBe(true);
+  });
+
+  it.each(["hi", "ta", "es", "fr", "tr", "und", "", null, undefined])("excludes other or unknown language %s", (lang) => {
+    expect(isEnglishFeedPost({ lang })).toBe(false);
+  });
+
+  it("excludes English posts that quote non-English or unlabelled text", () => {
+    expect(isEnglishFeedPost({ lang: "en", quotedTweet: { text: "Hello", lang: "en" } })).toBe(true);
+    expect(isEnglishFeedPost({ lang: "en", quotedTweet: { text: "नमस्ते", lang: "hi" } })).toBe(false);
+    expect(isEnglishFeedPost({ lang: "en", quotedTweet: { text: "Unknown language" } })).toBe(false);
+  });
+});
+
+describe("feed actions", () => {
+  it.each(["like", "bookmark"])("submits %s with source context for preference history", async (action) => {
+    const tweet = { id: "123", text: "A post I want to save", author: { name: "Author" }, createdAtISO: "2026-10-31T12:00:00Z" };
+    let payload;
+    await submitFeedAction(tweet, action, async (path, options) => {
+      expect(path).toBe("/api/growth/approve");
+      expect(options.method).toBe("POST");
+      payload = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ ok: true, record: { result: { ok: true } } }) };
+    });
+    expect(payload.action).toBe(action);
+    expect(payload.tweet_id).toBe("123");
+    expect(payload.metadata.source_tweet.text).toBe(tweet.text);
+    expect(payload.metadata.source_tweet.createdAtISO).toBe(tweet.createdAtISO);
+  });
+
+  it("surfaces API errors so the row can be retried", async () => {
+    await expect(submitFeedAction({ id: "1" }, "like", async () => ({ ok: false, json: async () => ({ detail: "Rate limited" }) }))).rejects.toThrow("Rate limited");
+  });
+
+  it("does not report success when the CLI reports failure", async () => {
+    await expect(submitFeedAction({ id: "1" }, "bookmark", async () => ({ ok: true, json: async () => ({ ok: true, record: { result: { ok: false } } }) }))).rejects.toThrow("Unable to bookmark");
+  });
+
+  it("rejects unsupported actions before sending a request", async () => {
+    await expect(submitFeedAction({ id: "1" }, "delete", () => { throw new Error("Must not run"); })).rejects.toThrow("valid post action");
+  });
+});
 
 describe("feed pagination", () => {
   it("appends new posts in order and removes overlap within and across pages", () => {

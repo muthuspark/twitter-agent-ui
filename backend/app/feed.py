@@ -26,7 +26,7 @@ def cli_python_command() -> list[str]:
     return command
 
 
-def fetch_feed_page(cursor: str | None = None, limit: int = 20) -> dict:
+def fetch_feed_page(cursor: str | None = None, limit: int = 20, *, tweet_id: str | None = None) -> dict:
     # Running the file directly would put app/twitter_cli.py ahead of the
     # installed twitter_cli package on sys.path.
     command = [
@@ -34,17 +34,21 @@ def fetch_feed_page(cursor: str | None = None, limit: int = 20) -> dict:
         "import runpy, sys; runpy.run_path(sys.argv[1], run_name='__main__')",
         str(Path(__file__).with_name("feed_bridge.py")),
     ]
+    request = {"cursor": cursor, "limit": limit}
+    if tweet_id:
+        request["tweet_id"] = tweet_id
+    label = "conversation" if tweet_id else "Twitter feed"
     try:
         completed = subprocess.run(
-            command, input=json.dumps({"cursor": cursor, "limit": limit}),
+            command, input=json.dumps(request),
             capture_output=True, text=True, timeout=45, check=False,
         )
     except FileNotFoundError as exc:
         raise CliNotFoundError("The twitter CLI Python interpreter was not found") from exc
     except subprocess.TimeoutExpired as exc:
-        raise CliTimeoutError("Loading your Twitter feed timed out. Try again.") from exc
+        raise CliTimeoutError(f"Loading your {label} timed out. Try again.") from exc
     if completed.returncode:
-        raise CliExecutionError("Unable to load your Twitter feed. Check your CLI sign-in and try again.")
+        raise CliExecutionError(f"Unable to load your {label}. Check your CLI sign-in and try again.")
     try:
         page = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
