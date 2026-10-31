@@ -2,9 +2,9 @@ import json
 import sqlite3
 import subprocess
 
-from app.deepseek_client import (
-    analyze_with_deepseek,
-    generate_post_ideas_with_deepseek,
+from app.codex_client import (
+    analyze_with_codex,
+    generate_post_ideas_with_codex,
     parse_post_ideas,
     parse_recommendations,
 )
@@ -48,7 +48,7 @@ def test_extract_tweet_candidates_from_cli_envelope():
     ]
 
 
-def test_parse_recommendations_accepts_deepseek_json_shape():
+def test_parse_recommendations_accepts_codex_json_shape():
     content = json.dumps(
         {
             "recommendations": [
@@ -172,7 +172,7 @@ def test_run_post_action_executes_safe_argument_list(monkeypatch):
     assert result.data == {"ok": True, "id": "post-1"}
 
 
-def test_parse_post_ideas_accepts_deepseek_json_shape():
+def test_parse_post_ideas_accepts_codex_json_shape():
     parsed = parse_post_ideas(
         json.dumps(
             {
@@ -353,76 +353,36 @@ def test_growth_store_builds_preference_memory_from_recent_decisions(tmp_path):
     assert memory["skip_examples"][0]["source_tweet"]["author"]["screenName"] == "coach"
 
 
-def test_deepseek_request_includes_preference_memory():
+def test_codex_request_includes_preference_memory(monkeypatch):
+    from app import codex_client
     captured = {}
-
-    class FakeResponse:
-        status_code = 200
-
-        def json(self):
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "content": '{"recommendations":[{"tweet_id":"123","action":"skip","confidence":60,"reason":"Already covered","comment_drafts":[],"risk":"low"}]}'
-                        }
-                    }
-                ]
-            }
-
-    def fake_post(url, headers, json, timeout):
-        captured["payload"] = json
-        return FakeResponse()
-
-    analyze_with_deepseek(
-        [{"id": "123", "text": "AI agents are easy"}],
-        "AI and software engineering",
-        api_key="test-key",
-        post=fake_post,
+    def run(system, payload, schema, **kwargs):
+        captured.update(payload)
+        return '{"recommendations":[{"tweet_id":"123","action":"skip","confidence":60,"reason":"Already covered","comment_drafts":[],"risk":"low"}]}'
+    monkeypatch.setattr(codex_client, "_run_codex", run)
+    analyze_with_codex(
+        [{"id": "123", "text": "AI agents are easy"}], "AI and software engineering",
         preference_memory={"summary": "User prefers technical replies about evals."},
     )
-
-    user_content = captured["payload"]["messages"][1]["content"]
-    assert "User prefers technical replies about evals" in user_content
+    assert captured["preference_memory"]["summary"] == "User prefers technical replies about evals."
 
 
-def test_generate_post_ideas_request_includes_jovis_positioning():
+def test_generate_post_ideas_request_includes_jovis_positioning(monkeypatch):
+    from app import codex_client
     captured = {}
-
-    class FakeResponse:
-        status_code = 200
-
-        def json(self):
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "content": '{"ideas":[{"title":"CRM answers","angle":"CRM data is trapped","audience":"RevOps","rationale":"High intent","cta":"See Jovis","post_text":"Your CRM already knows which deals are stuck. The hard part is asking the question without rebuilding a dashboard."}]}'
-                        }
-                    }
-                ]
-            }
-
-    def fake_post(url, headers, json, timeout):
-        captured["payload"] = json
-        return FakeResponse()
-
-    ideas = generate_post_ideas_with_deepseek(
-        "Jovis.ai target customers",
-        "CRM analytics",
-        api_key="test-key",
-        post=fake_post,
+    def run(system, payload, schema, **kwargs):
+        captured.update(payload)
+        return '{"ideas":[{"title":"CRM answers","audience":"RevOps","post_text":"Your CRM already knows which deals are stuck."}]}'
+    monkeypatch.setattr(codex_client, "_run_codex", run)
+    ideas = generate_post_ideas_with_codex(
+        "Jovis.ai target customers", "CRM analytics",
         preference_memory={"summary": "User prefers concrete posts."},
         recent_liked_posts=[{"id": "123", "text": "Teams need faster answers from CRM data."}],
         recent_bookmarked_posts=[{"id": "456", "text": "Practical tips for database tooling."}],
     )
-
-    user_content = captured["payload"]["messages"][1]["content"]
-    assert "Jovis.ai target customers" in user_content
-    assert "CRM analytics" in user_content
-    assert json.loads(user_content)["recent_liked_posts"] == [
-        {"id": "123", "text": "Teams need faster answers from CRM data."}
-    ]
-    assert json.loads(user_content)["recent_bookmarked_posts"][0]["id"] == "456"
-    assert "primary evidence" in json.loads(user_content)["instruction"]
+    assert captured["profile_focus"] == "Jovis.ai target customers"
+    assert captured["themes"] == "CRM analytics"
+    assert captured["recent_liked_posts"][0]["id"] == "123"
+    assert captured["recent_bookmarked_posts"][0]["id"] == "456"
+    assert "primary evidence" in captured["instruction"]
     assert ideas[0]["audience"] == "RevOps"

@@ -19,10 +19,15 @@ python3 -m uvicorn app.main:app --app-dir backend --reload
 
 The API runs on `http://127.0.0.1:8000`.
 
+All AI requests use the installed `codex` CLI. Run `codex login` before starting
+the backend. No DeepSeek API key is used. Text requests run in temporary, read-only
+workspaces with tools and image generation disabled, and return schema-constrained
+JSON. Requests time out after three minutes; at most two text requests run at once.
+There is no API fallback.
+
 Optional backend environment variables:
 
-- `DEEPSEEK_API_KEY`: required for Growth Mode analysis.
-- `DEEPSEEK_MODEL`: defaults to `deepseek-v4-flash`.
+- `CODEX_MODEL`: optional model override; omit to use the Codex CLI default.
 - `GROWTH_DB_PATH`: defaults to `backend/growth.sqlite3`.
 
 Put these in `.env` at the project root or `backend/.env`. Shell environment variables still win over `.env` values.
@@ -67,7 +72,7 @@ The first screen fetches real data with `twitter feed --max 20 --json` through t
 
 ## Growth Mode
 
-Growth Mode discovers candidate posts with `twitter search`, sends the candidate list to DeepSeek for `like`, `comment`, or `skip` recommendations, and shows each recommendation for manual approval.
+Growth Mode discovers candidate posts with `twitter search`, sends the candidate list to Codex CLI for `like`, `comment`, or `skip` recommendations, and shows each recommendation for manual approval.
 
 No write action runs automatically. The UI shows the exact command and requires one approval per action before the backend executes `twitter like <tweet_id> --json` or `twitter reply <tweet_id> <text> --json`.
 
@@ -75,7 +80,7 @@ No write action runs automatically. The UI shows the exact command and requires 
 
 The app records approval and rejection context in the local Growth Mode SQLite database. For each decision it stores the source post, recommendation reason, available comment drafts, selected or edited comment, action, and outcome.
 
-Before DeepSeek analyzes new candidates, the backend summarizes recent approved comments, rejected recommendations, and approved skips, then includes that memory in the DeepSeek request. This lets recommendations adapt toward the comments you approve and away from posts or drafts you skip or reject.
+Before Codex CLI analyzes new candidates, the backend summarizes recent approved comments, rejected recommendations, and approved skips, then includes that memory in the Codex CLI request. This lets recommendations adapt toward the comments you approve and away from posts or drafts you skip or reject.
 
 ## Credits
 
@@ -86,6 +91,39 @@ This project uses [`public-clis/twitter-cli`](https://github.com/public-clis/twi
 Apache License 2.0. See [LICENSE](./LICENSE).
 
 ## Post Ideas
+
+Both generation modes use the requested ASD-STE100-inspired writing style (roughly
+80% of its principles, without claiming formal compliance): short active sentences,
+one main idea per sentence, common words, consistent technical terms and concrete
+examples where useful. Drafts must retain accuracy, uncertainty and important nuance;
+clarity takes priority over brevity. This style overrides conflicting voice memory.
+
+The UI defaults to **Trending AI & technology**. Each research run gathers the past
+seven days of technology stories from Hacker News, recently created AI repositories
+from GitHub, and official OpenAI, Hugging Face and Google DeepMind publisher feeds.
+Drafts include validated source links, dates and available engagement counts. Hacker
+News points and cumulative GitHub stars are separate popularity signals; publisher
+announcements have no measured popularity. This is a curated source sample, not a
+ranking of the entire internet. Provider failures are reported and usable sources
+continue to work; a run with no recent sources fails without inventing replacements.
+Draft generation uses the signed-in Codex CLI and posting still requires
+manual approval. Select **My likes & bookmarks** for the personal interest mode below.
+
+**Images and publishing:** Drafts are text-only by default. Enable **Generate images with drafts** to create an
+editorial illustration for each draft through the installed, signed-in `codex` CLI.
+The backend uses native Codex image generation in an isolated working directory,
+with two image jobs at a time. No separate OpenAI API key is required for this path.
+Run `codex login` locally if sign-in is needed. Native image access and usage limits
+depend on the signed-in account. Generated files and job status live in
+`backend/media/` (gitignored); set `POST_IMAGE_DIR` to change that location.
+
+Review the image preview and editable text, then click **Approve and post text +
+image** to publish both with one Twitter CLI command. This button waits for the
+image to finish. Regenerate an image to replace it, or turn off **Include image**
+to publish text alone. A failed or missing selected image never silently becomes a
+text-only post. Drafts and image job references are saved in browser storage across
+tab switches and reloads. Interrupted backend jobs show a retry message. The exact
+image brief is available under each preview.
 
 Post Ideas uses both likes and bookmarks, with a rolling 48-hour window. App-recorded
 approved likes and bookmarks are filtered by their action time, so an older post

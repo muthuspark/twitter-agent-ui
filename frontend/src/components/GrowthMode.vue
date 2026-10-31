@@ -403,7 +403,7 @@ onMounted(loadHistory);
             <p class="mt-1 text-sm leading-6 text-muted">
               {{
                 recommendations.length
-                  ? "DeepSeek did not find any like or comment actions worth showing. Adjust the search query or try again later."
+                  ? "Codex CLI did not find any like or comment actions worth showing. Adjust the search query or try again later."
                   : "Run discovery and analysis to turn these posts into like or comment recommendations."
               }}
             </p>
@@ -414,7 +414,7 @@ onMounted(loadHistory);
           <div class="max-w-sm">
             <div class="font-semibold">Discover posts to start</div>
             <p class="mt-1 text-sm leading-6 text-muted">
-              Search for AI, startup, software engineering, and founder conversations, then ask DeepSeek to rank them.
+              Search for AI, startup, software engineering, and founder conversations, then ask Codex CLI to rank them.
             </p>
           </div>
         </div>

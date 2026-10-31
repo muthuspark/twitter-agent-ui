@@ -210,7 +210,7 @@ export function combinedGrowthButtonState({ loadingDiscover, loadingAnalyze }) {
     return { disabled: true, label: "Discovering posts" };
   }
   if (loadingAnalyze) {
-    return { disabled: true, label: "Analyzing with DeepSeek" };
+    return { disabled: true, label: "Analyzing with Codex CLI" };
   }
   return { disabled: false, label: "Discover and analyze" };
 }

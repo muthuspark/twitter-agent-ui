@@ -306,7 +306,7 @@ describe("combinedGrowthButtonState", () => {
     });
     expect(combinedGrowthButtonState({ loadingDiscover: false, loadingAnalyze: true })).toEqual({
       disabled: true,
-      label: "Analyzing with DeepSeek",
+      label: "Analyzing with Codex CLI",
     });
   });
 });

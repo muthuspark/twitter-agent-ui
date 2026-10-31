@@ -12,3 +12,4 @@ frontend/node_modules/
 backend/.env
 keys/
 backend/*.sqlite3
+backend/media/

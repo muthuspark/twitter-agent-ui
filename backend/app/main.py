@@ -4,20 +4,25 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Path as ApiPath
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from app.analytics import AnalyticsConfigurationError, AnalyticsDataError, fetch_analytics_summary
 from app.config import load_environment
 from app.models import Preset, PresetField, RunRequest, RunResponse
-from app.deepseek_client import (
-    DeepSeekConfigurationError,
-    DeepSeekError,
-    analyze_with_deepseek,
-    generate_post_ideas_with_deepseek,
+from app.codex_client import (
+    CodexConfigurationError,
+    CodexError,
+    CodexTimeoutError,
+    CodexBusyError,
+    analyze_with_codex,
+    generate_post_ideas_with_codex,
 )
 from app.growth import GrowthValidationError, extract_tweet_candidates
 from app.storage import GrowthStore
 from app.interests import collect_interest_context
 from app.feed import fetch_feed_page
+from app.trends import ResearchError, fetch_trending_research
+from app.post_images import ImageGenerationError, start_image_job, get_image_job, ready_image_path
 from app.twitter_cli import (
     PRESETS,
     CliExecutionError,
@@ -56,7 +61,7 @@ def analyze_candidates(
     profile_focus: str,
     preference_memory: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    return analyze_with_deepseek(
+    return analyze_with_codex(
         candidates,
         profile_focus,
         preference_memory=preference_memory,
@@ -70,14 +75,16 @@ def generate_post_ideas(
     count: int = 5,
     recent_liked_posts: list[dict[str, Any]] | None = None,
     recent_bookmarked_posts: list[dict[str, Any]] | None = None,
+    research_sources: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    return generate_post_ideas_with_deepseek(
+    return generate_post_ideas_with_codex(
         profile_focus,
         themes,
         preference_memory=preference_memory,
         count=count,
         recent_liked_posts=recent_liked_posts,
         recent_bookmarked_posts=recent_bookmarked_posts,
+        research_sources=research_sources,
     )
 
 
@@ -238,9 +245,13 @@ def growth_analyze(request: dict[str, Any]) -> dict[str, Any]:
     preference_memory = store.preference_memory()
     try:
         recommendations = analyze_candidates(candidates, profile_focus, preference_memory)
-    except DeepSeekConfigurationError as exc:
+    except CodexTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except CodexBusyError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except DeepSeekError as exc:
+    except CodexConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CodexError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     saved = store.save_recommendations(recommendations)
@@ -294,16 +305,28 @@ def growth_approve(request: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/api/posts/ideas")
 def post_ideas(request: dict[str, Any]) -> dict[str, Any]:
+    source_mode = str(request.get("source_mode") or "interests")
+    if source_mode not in {"trends", "interests"}:
+        raise HTTPException(status_code=422, detail="Choose trending research or recent interests.")
     profile_focus = str(request.get("profile_focus") or "").strip()
     themes = str(request.get("themes") or "").strip()
     count = int(request.get("count", 5) or 5)
     store = get_growth_store()
-    context = collect_interest_context(store, fetch_recent_liked_posts, fetch_recent_bookmarked_posts)
-    if not context["likes"] and not context["bookmarks"]:
-        detail = "No eligible likes or bookmarks found for the last 48 hours. Try again after liking or saving posts."
-        if context["warning"]:
-            detail += " " + context["warning"]
-        raise HTTPException(status_code=422, detail=detail)
+    research = None
+    if source_mode == "trends":
+        try:
+            research = fetch_trending_research()
+        except ResearchError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        profile_focus = profile_focus or "Technology and artificial intelligence"
+        context = {"likes": [], "bookmarks": [], "since": research["since"], "until": research["researched_at"], "warning": research["warning"]}
+    else:
+        context = collect_interest_context(store, fetch_recent_liked_posts, fetch_recent_bookmarked_posts)
+        if not context["likes"] and not context["bookmarks"]:
+            detail = "No eligible likes or bookmarks found for the last 48 hours. Try again after liking or saving posts."
+            if context["warning"]:
+                detail += " " + context["warning"]
+            raise HTTPException(status_code=422, detail=detail)
     try:
         ideas = generate_post_ideas(
             profile_focus,
@@ -312,11 +335,27 @@ def post_ideas(request: dict[str, Any]) -> dict[str, Any]:
             count=count,
             recent_liked_posts=context["likes"],
             recent_bookmarked_posts=context["bookmarks"],
+            **({"research_sources": research["sources"]} if research else {}),
         )
-    except DeepSeekConfigurationError as exc:
+    except CodexTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except CodexBusyError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except DeepSeekError as exc:
+    except CodexConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CodexError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if research:
+        by_id = {source["id"]: source for source in research["sources"]}
+        grounded = []
+        for idea in ideas[:max(1, min(8, count))]:
+            ids = [source_id for source_id in dict.fromkeys(idea.get("source_ids", [])) if source_id in by_id]
+            if ids:
+                grounded.append({**idea, "source_ids": ids, "sources": [by_id[source_id] for source_id in ids]})
+        if not grounded:
+            raise HTTPException(status_code=502, detail="The generator returned drafts without valid research references. Please try again.")
+        ideas = grounded
 
     return {
         "ok": True, "ideas": ideas,
@@ -325,7 +364,34 @@ def post_ideas(request: dict[str, Any]) -> dict[str, Any]:
         "unique_posts_used": len({post["id"] for post in context["likes"] + context["bookmarks"]}),
         "context_since": context["since"], "context_until": context["until"],
         "context_warning": context["warning"], "likes_warning": context["warning"],
+        "source_mode": source_mode,
+        "research_sources": research["sources"] if research else [],
+        "researched_at": research["researched_at"] if research else None,
     }
+
+
+@app.post("/api/posts/images")
+def create_post_image(request: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return {"ok": True, "image": start_image_job(request.get("post_text"), request.get("title", ""))}
+    except ImageGenerationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/posts/images/{image_id}")
+def post_image_status(image_id: str) -> dict[str, Any]:
+    try:
+        return {"ok": True, "image": get_image_job(image_id)}
+    except ImageGenerationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/posts/images/{image_id}/file")
+def post_image_file(image_id: str):
+    try:
+        return FileResponse(ready_image_path(image_id), media_type="image/jpeg")
+    except ImageGenerationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/api/posts/approve")
@@ -333,7 +399,17 @@ def approve_post(request: dict[str, Any]) -> dict[str, Any]:
     post_text = str(request.get("post_text", "") or "").strip()
     metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
     try:
-        result = run_post_action(post_text)
+        image_id = request.get("image_id")
+        if image_id:
+            image_path = ready_image_path(image_id)
+            result = run_post_action(post_text, image_path=str(image_path))
+            metadata = {**metadata, "image": {"id": image_id, "url": f"/api/posts/images/{image_id}/file"}}
+        else:
+            result = run_post_action(post_text)
+        if isinstance(result.data, dict) and result.data.get("ok") is False:
+            raise CliExecutionError("X did not publish this post. Check the session and retry.")
+    except ImageGenerationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except GrowthValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CliNotFoundError as exc:

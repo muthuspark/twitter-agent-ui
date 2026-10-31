@@ -164,13 +164,13 @@ def run_twitter_command(preset_id: str, options: dict[str, Any] | None = None) -
     return CliResult(command=command, data=data)
 
 
-def _run_json_command(command: list[str]) -> CliResult:
+def _run_json_command(command: list[str], timeout: int = 25) -> CliResult:
     try:
         completed = subprocess.run(
             command,
             capture_output=True,
             text=True,
-            timeout=25,
+            timeout=timeout,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
@@ -194,9 +194,11 @@ def run_growth_action(action: str, tweet_id: str, comment_text: str | None = Non
     return _run_json_command(command)
 
 
-def run_post_action(post_text: str) -> CliResult:
+def run_post_action(post_text: str, image_path: str | None = None) -> CliResult:
     command = build_post_command(post_text)
-    return _run_json_command(command)
+    if image_path:
+        command.extend(["--image", str(image_path)])
+    return _run_json_command(command, timeout=90 if image_path else 25)
 
 
 def fetch_recent_liked_posts(limit: int = 20) -> list[dict[str, Any]]:

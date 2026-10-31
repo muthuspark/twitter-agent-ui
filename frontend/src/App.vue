@@ -16,7 +16,6 @@ import {
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 import AnalyticsDashboard from "./components/AnalyticsDashboard.vue";
-import GrowthMode from "./components/GrowthMode.vue";
 import PostIdeas from "./components/PostIdeas.vue";
 import Feeds from "./components/Feeds.vue";
 import { loadBlockedTerms } from "./lib/blocklist";
@@ -298,15 +297,6 @@ onMounted(async () => {
             </button>
             <button
               class="manuscript-tab"
-              :class="{ 'is-active': activeTab === 'growth' }"
-              :aria-current="activeTab === 'growth' ? 'page' : undefined"
-              type="button"
-              @click="activeTab = 'growth'"
-            >
-              Growth Mode
-            </button>
-            <button
-              class="manuscript-tab"
               :class="{ 'is-active': activeTab === 'postIdeas' }"
               :aria-current="activeTab === 'postIdeas' ? 'page' : undefined"
               type="button"
@@ -585,7 +575,6 @@ onMounted(async () => {
           </div>
         </section>
       </main>
-      <GrowthMode v-else-if="activeTab === 'growth'" />
       <PostIdeas v-else-if="activeTab === 'postIdeas'" />
       <AnalyticsDashboard v-else-if="activeTab === 'analytics'" />
       <KeepAlive>
