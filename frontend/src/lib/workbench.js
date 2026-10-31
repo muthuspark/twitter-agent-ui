@@ -77,6 +77,7 @@ export function formatDate(value) {
 export function growthActionLabel(action) {
   const labels = {
     like: "Like",
+    bookmark: "Bookmark",
     comment: "Comment",
     post: "Post",
     skip: "Skip",
@@ -139,9 +140,9 @@ export function buildGrowthActionPayload(item, action = item?.action ?? "skip") 
   };
 }
 
-export function buildTweetLikePayload(tweet) {
+export function buildTweetActionPayload(tweet, action = "like") {
   return {
-    action: "like",
+    action,
     tweet_id: tweet?.id,
     comment_text: "",
     metadata: {
@@ -179,6 +180,7 @@ export function saveWorkbenchCache(storage, state) {
       rawVisible: Boolean(state?.rawVisible),
       lastRunMs: state?.lastRunMs ?? null,
       likedTweetIds: Array.isArray(state?.likedTweetIds) ? state.likedTweetIds : [],
+      bookmarkedTweetIds: Array.isArray(state?.bookmarkedTweetIds) ? state.bookmarkedTweetIds : [],
     }),
   );
 }
@@ -196,6 +198,7 @@ export function loadWorkbenchCache(storage) {
       rawVisible: Boolean(cached.rawVisible),
       lastRunMs: cached.lastRunMs ?? null,
       likedTweetIds: Array.isArray(cached.likedTweetIds) ? cached.likedTweetIds : [],
+      bookmarkedTweetIds: Array.isArray(cached.bookmarkedTweetIds) ? cached.bookmarkedTweetIds : [],
     };
   } catch {
     return null;

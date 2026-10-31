@@ -4,7 +4,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
-from app.growth import build_growth_action_command, build_post_command
+from app.growth import build_growth_action_command, build_post_command, extract_tweet_candidates
 
 
 class ValidationError(Exception):
@@ -197,3 +197,25 @@ def run_growth_action(action: str, tweet_id: str, comment_text: str | None = Non
 def run_post_action(post_text: str) -> CliResult:
     command = build_post_command(post_text)
     return _run_json_command(command)
+
+
+def fetch_recent_liked_posts(limit: int = 20) -> list[dict[str, Any]]:
+    identity = run_twitter_command("whoami").data
+    if identity.get("ok") is False:
+        raise CliExecutionError("Unable to identify the authenticated X account")
+    profile = identity.get("data") or {}
+    profile = profile.get("user", profile)
+    handle = profile.get("screenName") or profile.get("username")
+    if not handle:
+        raise InvalidCliOutputError("Twitter CLI did not return the authenticated username")
+    result = _run_json_command(["twitter", "likes", handle, "--max", str(limit), "--json"])
+    if result.data.get("ok") is False:
+        raise CliExecutionError("Unable to fetch recently liked posts from X")
+    return extract_tweet_candidates(result.data, "")[:limit]
+
+
+def fetch_recent_bookmarked_posts(limit: int = 100) -> list[dict[str, Any]]:
+    result = run_twitter_command("bookmarks", {"max": limit})
+    if result.data.get("ok") is False:
+        raise CliExecutionError("Unable to fetch bookmarked posts from X")
+    return extract_tweet_candidates(result.data, "")[:limit]

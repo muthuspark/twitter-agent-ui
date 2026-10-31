@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   buildCommandPreview,
   buildGrowthActionPayload,
-  buildTweetLikePayload,
+  buildTweetActionPayload,
   combinedGrowthButtonState,
   buildRecommendationMetadata,
   formatMetric,
@@ -211,9 +211,9 @@ describe("buildGrowthActionPayload", () => {
   });
 });
 
-describe("buildTweetLikePayload", () => {
+describe("buildTweetActionPayload", () => {
   test("builds a direct like payload from a plain workbench tweet", () => {
-    const payload = buildTweetLikePayload({
+    const payload = buildTweetActionPayload({
       id: "feed-123",
       text: "Shipping local agents",
       author: { screenName: "ada" },
@@ -276,6 +276,7 @@ describe("workbench cache", () => {
       rawVisible: false,
       lastRunMs: 321,
       likedTweetIds: ["feed-123"],
+      bookmarkedTweetIds: ["feed-456"],
     };
 
     saveWorkbenchCache(storage, cachedState);
@@ -308,4 +309,13 @@ describe("combinedGrowthButtonState", () => {
       label: "Analyzing with DeepSeek",
     });
   });
+});
+
+ test("builds bookmark payloads with source context and no comment", () => {
+  const payload = buildTweetActionPayload({ id: "123", text: "Save this" }, "bookmark");
+  expect(payload.action).toBe("bookmark");
+  expect(payload.tweet_id).toBe("123");
+  expect(payload.comment_text).toBe("");
+  expect(payload.metadata.source_tweet.text).toBe("Save this");
+  expect(growthActionLabel("bookmark")).toBe("Bookmark");
 });

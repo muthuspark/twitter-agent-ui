@@ -13,6 +13,8 @@ from app.twitter_cli import (
     build_command,
     resolve_search_query,
     run_twitter_command,
+    fetch_recent_liked_posts,
+    fetch_recent_bookmarked_posts,
 )
 
 
@@ -22,10 +24,44 @@ def test_builds_feed_command_with_json_and_max():
     assert command == ["twitter", "feed", "--max", "12", "--json"]
 
 
+def test_fetches_recent_likes_for_authenticated_account(monkeypatch):
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        data = {"user": {"screenName": "my-account"}} if command[1] == "whoami" else [
+            {"id": "123", "text": "Useful post"}
+        ]
+        return subprocess.CompletedProcess(command, 0, json.dumps({"ok": True, "data": data}), "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert fetch_recent_liked_posts()[0]["text"] == "Useful post"
+    assert commands == [
+        ["twitter", "whoami", "--json"],
+        ["twitter", "likes", "my-account", "--max", "20", "--json"],
+    ]
+
+
 def test_builds_search_command_with_query_and_max():
     command = build_command("search", {"query": "ai agents", "max": 8})
 
     assert command == ["twitter", "search", "ai agents", "--max", "8", "--json"]
+
+
+def test_fetches_bookmarks_with_source_dates(monkeypatch):
+    def fake_run(command, **kwargs):
+        assert command == ["twitter", "bookmarks", "--max", "100", "--json"]
+        data = {"ok": True, "data": [{"id": "123", "text": "Saved post", "createdAtISO": "2026-10-31T00:00:00Z"}]}
+        return subprocess.CompletedProcess(command, 0, json.dumps(data), "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert fetch_recent_bookmarked_posts()[0]["createdAtISO"] == "2026-10-31T00:00:00Z"
+
+
+def test_bookmark_api_failure_is_not_treated_as_an_empty_collection(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess([], 0, '{"ok":false}', ""))
+    with pytest.raises(CliExecutionError):
+        fetch_recent_bookmarked_posts()
 
 
 def test_rejects_unknown_preset():

@@ -230,6 +230,12 @@ def test_growth_store_records_recommendations_and_actions(tmp_path):
     assert count == 1
 
 
+def test_post_ideas_preserves_overlength_drafts_for_editing_instead_of_cutting_sentences():
+    draft = "A complete draft. " * 20
+    ideas = parse_post_ideas(json.dumps({"ideas": [{"post_text": draft}]}))
+    assert ideas[0]["post_text"] == draft.strip()
+
+
 def test_growth_store_records_action_metadata_for_memory(tmp_path):
     store = GrowthStore(tmp_path / "growth.sqlite3")
     store.record_action(
@@ -407,9 +413,16 @@ def test_generate_post_ideas_request_includes_jovis_positioning():
         api_key="test-key",
         post=fake_post,
         preference_memory={"summary": "User prefers concrete posts."},
+        recent_liked_posts=[{"id": "123", "text": "Teams need faster answers from CRM data."}],
+        recent_bookmarked_posts=[{"id": "456", "text": "Practical tips for database tooling."}],
     )
 
     user_content = captured["payload"]["messages"][1]["content"]
     assert "Jovis.ai target customers" in user_content
     assert "CRM analytics" in user_content
+    assert json.loads(user_content)["recent_liked_posts"] == [
+        {"id": "123", "text": "Teams need faster answers from CRM data."}
+    ]
+    assert json.loads(user_content)["recent_bookmarked_posts"][0]["id"] == "456"
+    assert "primary evidence" in json.loads(user_content)["instruction"]
     assert ideas[0]["audience"] == "RevOps"

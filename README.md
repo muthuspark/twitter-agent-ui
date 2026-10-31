@@ -84,3 +84,36 @@ This project uses [`public-clis/twitter-cli`](https://github.com/public-clis/twi
 ## License
 
 Apache License 2.0. See [LICENSE](./LICENSE).
+
+## Post Ideas
+
+Post Ideas uses both likes and bookmarks, with a rolling 48-hour window. App-recorded
+approved likes and bookmarks are filtered by their action time, so an older post
+saved today still qualifies. The Twitter CLI does not expose engagement timestamps:
+imported likes and bookmarks are filtered by the post publication date instead.
+The UI shows this limitation and any source-fetch failures. Undated or future-dated
+imports are excluded. Up to 100 posts per source are fetched, with up to 40 matching
+posts per source sent to the generator; overlapping IDs are identified as the same
+reference. If neither source has usable recent context, generation stops with an
+explanation instead of producing unrelated generic ideas.
+
+Profile focus and themes are optional. Recent interests lead topic selection, while
+past approvals guide voice. Drafts still require explicit approval before posting.
+
+## Feeds
+
+The Feeds tab reads the authenticated account's actual For you home timeline.
+Scrolling near the bottom loads the next Twitter cursor page, with duplicate post
+IDs removed. Latest posts starts a fresh timeline. The loaded feed stays available
+when switching tabs. Photos load lazily; video links open the original post on X.
+
+The public `twitter feed` command drops pagination cursors, so
+`backend/app/feed_bridge.py` runs a one-page adapter inside the installed
+`twitter-cli` Python environment, using the same authentication and serializer.
+The adapter isolates the dependency on the client's internal timeline methods;
+it does not modify the installed CLI. Set `TWITTER_CLI_PYTHON` to that environment's
+Python executable if the `twitter` entry point is not a Python script.
+
+Scrolling continues while Twitter returns advancing cursors. An exhausted timeline
+shows an end message. Three consecutive pages without new posts pause automatic
+requests and leave a Load more posts button available.

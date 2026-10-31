@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.analytics import AnalyticsConfigurationError, AnalyticsDataError, fetch_analytics_summary
@@ -16,6 +16,8 @@ from app.deepseek_client import (
 )
 from app.growth import GrowthValidationError, extract_tweet_candidates
 from app.storage import GrowthStore
+from app.interests import collect_interest_context
+from app.feed import fetch_feed_page
 from app.twitter_cli import (
     PRESETS,
     CliExecutionError,
@@ -23,6 +25,8 @@ from app.twitter_cli import (
     CliTimeoutError,
     InvalidCliOutputError,
     ValidationError,
+    fetch_recent_liked_posts,
+    fetch_recent_bookmarked_posts,
     resolve_search_query,
     run_growth_action,
     run_post_action,
@@ -64,12 +68,16 @@ def generate_post_ideas(
     themes: str,
     preference_memory: dict[str, Any] | None = None,
     count: int = 5,
+    recent_liked_posts: list[dict[str, Any]] | None = None,
+    recent_bookmarked_posts: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     return generate_post_ideas_with_deepseek(
         profile_focus,
         themes,
         preference_memory=preference_memory,
         count=count,
+        recent_liked_posts=recent_liked_posts,
+        recent_bookmarked_posts=recent_bookmarked_posts,
     )
 
 
@@ -137,6 +145,21 @@ def presets() -> dict[str, list[Preset]]:
             )
         )
     return {"presets": result}
+
+
+@app.get("/api/feed")
+def home_feed(
+    cursor: str | None = Query(default=None, max_length=4096),
+    limit: int = Query(default=20, ge=1, le=40),
+) -> dict[str, Any]:
+    try:
+        return {"ok": True, **fetch_feed_page(cursor=cursor, limit=limit)}
+    except CliNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CliTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except (CliExecutionError, InvalidCliOutputError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/run", response_model=RunResponse)
@@ -255,29 +278,38 @@ def growth_approve(request: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/api/posts/ideas")
 def post_ideas(request: dict[str, Any]) -> dict[str, Any]:
-    profile_focus = str(
-        request.get("profile_focus")
-        or "Jovis.ai target customers who need answers from live business data"
-    )
-    themes = str(
-        request.get("themes")
-        or "data team bottlenecks, manual reporting, CRM analytics, support analytics, RevOps reporting"
-    )
+    profile_focus = str(request.get("profile_focus") or "").strip()
+    themes = str(request.get("themes") or "").strip()
     count = int(request.get("count", 5) or 5)
     store = get_growth_store()
+    context = collect_interest_context(store, fetch_recent_liked_posts, fetch_recent_bookmarked_posts)
+    if not context["likes"] and not context["bookmarks"]:
+        detail = "No eligible likes or bookmarks found for the last 48 hours. Try again after liking or saving posts."
+        if context["warning"]:
+            detail += " " + context["warning"]
+        raise HTTPException(status_code=422, detail=detail)
     try:
         ideas = generate_post_ideas(
             profile_focus,
             themes,
             preference_memory=store.preference_memory(),
             count=count,
+            recent_liked_posts=context["likes"],
+            recent_bookmarked_posts=context["bookmarks"],
         )
     except DeepSeekConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except DeepSeekError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    return {"ok": True, "ideas": ideas}
+    return {
+        "ok": True, "ideas": ideas,
+        "liked_posts_used": len(context["likes"]),
+        "bookmarked_posts_used": len(context["bookmarks"]),
+        "unique_posts_used": len({post["id"] for post in context["likes"] + context["bookmarks"]}),
+        "context_since": context["since"], "context_until": context["until"],
+        "context_warning": context["warning"], "likes_warning": context["warning"],
+    }
 
 
 @app.post("/api/posts/approve")

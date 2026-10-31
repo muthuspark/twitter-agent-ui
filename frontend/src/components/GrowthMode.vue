@@ -1,6 +1,7 @@
 <script setup>
 import {
   AlertCircle,
+  Bookmark,
   CheckCircle2,
   ExternalLink,
   Heart,
@@ -32,6 +33,7 @@ const history = ref([]);
 const loadingDiscover = ref(false);
 const loadingAnalyze = ref(false);
 const actionLoadingId = ref(null);
+const bookmarkedTweetIds = ref(new Set());
 const error = ref("");
 const discoverCommand = ref([]);
 
@@ -47,9 +49,9 @@ const primaryButtonState = computed(() =>
 );
 
 function actionTone(action) {
-  if (action === "comment") return "bg-[oklch(92%_0.045_245)] text-[oklch(34%_0.08_245)]";
-  if (action === "like") return "bg-[oklch(94%_0.034_155)] text-[oklch(34%_0.08_155)]";
-  return "bg-[oklch(94%_0.01_245)] text-[oklch(45%_0.024_245)]";
+  if (action === "comment") return "bg-accent-wash text-accent";
+  if (action === "like") return "bg-success-wash text-success";
+  return "bg-paper-shade text-muted";
 }
 
 function recommendationCommand(item) {
@@ -127,26 +129,17 @@ async function discoverAndAnalyze() {
   await analyze(candidates.value);
 }
 
-async function approve(item) {
+async function approve(item, action = item.action) {
+  if (actionLoadingId.value) return;
   actionLoadingId.value = item.id;
   error.value = "";
   try {
-    await requestJson("/api/growth/approve", buildGrowthActionPayload(item));
-    recommendations.value = recommendations.value.filter((entry) => entry.id !== item.id);
-    await loadHistory();
-  } catch (failure) {
-    error.value = failure.message;
-  } finally {
-    actionLoadingId.value = null;
-  }
-}
-
-async function likePost(item) {
-  actionLoadingId.value = item.id;
-  error.value = "";
-  try {
-    await requestJson("/api/growth/approve", buildGrowthActionPayload(item, "like"));
-    recommendations.value = recommendations.value.filter((entry) => entry.id !== item.id);
+    await requestJson("/api/growth/approve", buildGrowthActionPayload(item, action));
+    if (action === "bookmark") {
+      bookmarkedTweetIds.value = new Set([...bookmarkedTweetIds.value, item.tweet_id]);
+    } else {
+      recommendations.value = recommendations.value.filter((entry) => entry.id !== item.id);
+    }
     await loadHistory();
   } catch (failure) {
     error.value = failure.message;
@@ -186,19 +179,19 @@ onMounted(loadHistory);
 
 <template>
   <main
-    class="grid min-h-[calc(100vh-112px)] overflow-hidden rounded-lg border border-[oklch(85%_0.012_245)] bg-[oklch(98%_0.004_245)] shadow-sm xl:grid-cols-[320px_minmax(0,1fr)_340px]"
+    class="manuscript-layout growth-layout"
   >
-    <aside class="border-b border-[oklch(87%_0.011_245)] bg-[oklch(94%_0.007_245)] p-4 xl:border-b-0 xl:border-r">
-      <div class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[oklch(47%_0.024_245)]">
+    <aside class="manuscript-sidebar">
+      <div class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted">
         <Sparkles :size="14" aria-hidden="true" />
         Growth Mode
       </div>
-      <div class="grid gap-4">
+      <div class="settings-fields grid gap-4">
         <label class="grid gap-1.5 text-sm">
           <span class="font-medium">Search query</span>
           <textarea
             v-model="query"
-            class="min-h-24 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 py-2 leading-5"
+            class="min-h-24 rounded-sm border border-rule-strong bg-paper px-3 py-2 leading-5"
             placeholder="Leave empty to rotate through Jovis target-customer searches"
           ></textarea>
         </label>
@@ -206,21 +199,21 @@ onMounted(loadHistory);
           <span class="font-medium">Profile focus</span>
           <textarea
             v-model="profileFocus"
-            class="min-h-20 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 py-2 leading-5"
+            class="min-h-20 rounded-sm border border-rule-strong bg-paper px-3 py-2 leading-5"
           ></textarea>
         </label>
         <label class="grid gap-1.5 text-sm">
           <span class="font-medium">Max candidates</span>
           <input
             v-model.number="maxResults"
-            class="h-9 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3"
+            class="h-9 rounded-sm border border-rule-strong bg-paper px-3"
             max="30"
             min="1"
             type="number"
           />
         </label>
         <button
-          class="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-[oklch(58%_0.13_245)] px-4 text-sm font-semibold text-[oklch(98%_0.004_245)] hover:bg-[oklch(52%_0.14_245)] disabled:cursor-not-allowed disabled:opacity-55"
+          class="inline-flex h-9 items-center justify-center gap-2 rounded-sm bg-ink px-4 text-sm font-semibold text-paper hover:bg-ink-hover disabled:cursor-not-allowed disabled:opacity-55"
           :disabled="primaryButtonState.disabled"
           type="button"
           @click="discoverAndAnalyze"
@@ -231,7 +224,7 @@ onMounted(loadHistory);
         </button>
       </div>
 
-      <div class="mt-6 rounded-md border border-[oklch(83%_0.02_80)] bg-[oklch(96%_0.022_80)] p-3 text-sm text-[oklch(38%_0.055_80)]">
+      <div class="mt-6 rounded-sm border border-warning-rule bg-warning-wash p-3 text-sm text-warning">
         <div class="flex items-center gap-2 font-semibold">
           <ShieldCheck :size="16" aria-hidden="true" />
           Approval guardrail
@@ -242,35 +235,36 @@ onMounted(loadHistory);
       </div>
     </aside>
 
-    <section class="grid min-h-[620px] grid-rows-[auto_1fr] gap-4 overflow-hidden p-4">
+    <section class="manuscript-content">
+      <h2 class="text-2xl font-bold">Recommendations</h2>
       <div class="grid gap-3">
         <div
           v-if="error"
-          class="flex items-start gap-3 rounded-md border border-[oklch(79%_0.052_30)] bg-[oklch(96%_0.025_30)] p-3 text-sm text-[oklch(36%_0.075_30)]"
+          class="flex items-start gap-3 rounded-sm border border-danger-rule bg-danger-wash p-3 text-sm text-danger"
         >
           <AlertCircle class="mt-0.5 shrink-0" :size="18" aria-hidden="true" />
           <div>{{ error }}</div>
         </div>
-        <div class="rounded-md border border-[oklch(84%_0.014_245)] bg-[oklch(99%_0.004_245)] p-3">
-          <div class="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[oklch(47%_0.024_245)]">
+        <div class="discovery-command">
+          <div class="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted">
             Discovery command
           </div>
-          <div class="overflow-x-auto rounded-md bg-[oklch(21%_0.015_245)] px-3 py-2 font-mono text-sm text-[oklch(91%_0.01_245)]">
+          <div class="overflow-x-auto rounded-sm command-sheet bg-paper-shade px-3 py-2 font-mono text-sm text-ink">
             {{ discoverCommand.length ? discoverCommand.join(" ") : "twitter search ..." }}
           </div>
         </div>
-        <div class="flex flex-wrap gap-2 text-sm text-[oklch(48%_0.024_245)]">
-          <span class="rounded-md bg-[oklch(94%_0.007_245)] px-2 py-1">{{ candidates.length }} candidates</span>
-          <span class="rounded-md bg-[oklch(94%_0.007_245)] px-2 py-1">{{ recommendations.length }} pending recommendations</span>
+        <div class="flex flex-wrap gap-2 text-sm text-muted">
+          <span class="rounded-sm bg-paper-shade px-2 py-1">{{ candidates.length }} candidates</span>
+          <span class="rounded-sm bg-paper-shade px-2 py-1">{{ recommendations.length }} pending recommendations</span>
         </div>
       </div>
 
-      <div class="min-h-0 overflow-auto pr-1">
+      <div class="results-region">
         <div v-if="loadingDiscover || loadingAnalyze" class="grid gap-3">
           <div
             v-for="index in 4"
             :key="index"
-            class="h-36 animate-pulse rounded-md border border-[oklch(87%_0.012_245)] bg-[oklch(95%_0.007_245)]"
+            class="h-36 animate-pulse rounded-sm border border-rule bg-paper-shade"
           ></div>
         </div>
 
@@ -278,28 +272,28 @@ onMounted(loadHistory);
           <article
             v-for="item in enrichedRecommendations"
             :key="item.id"
-            class="rounded-md border border-[oklch(86%_0.012_245)] bg-[oklch(99%_0.004_245)] p-4"
+            class="rounded-sm border border-rule bg-paper p-4"
           >
             <div class="flex flex-wrap items-center gap-2">
               <span
-                class="inline-flex h-7 items-center rounded-md px-2 text-xs font-semibold"
+                class="inline-flex h-7 items-center rounded-sm px-2 text-xs font-semibold"
                 :class="actionTone(item.action)"
               >
                 {{ item.actionLabel }}
               </span>
               <span class="text-sm font-semibold">{{ item.confidence }}% confidence</span>
-              <span class="text-sm text-[oklch(48%_0.024_245)]">risk: {{ item.risk }}</span>
+              <span class="text-sm text-muted">risk: {{ item.risk }}</span>
             </div>
-            <p class="mt-3 text-sm leading-6 text-[oklch(34%_0.02_245)]">{{ item.reason }}</p>
+            <p class="mt-3 text-sm leading-6 text-ink-secondary">{{ item.reason }}</p>
 
-            <div class="mt-4 border-t border-[oklch(88%_0.011_245)] pt-4">
+            <div class="mt-4 border-t border-rule pt-4">
               <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <strong class="text-sm">{{ item.tweet?.author?.name || "Unknown" }}</strong>
-                <span class="text-sm text-[oklch(48%_0.024_245)]">@{{ item.tweet?.author?.screenName }}</span>
-                <span class="text-sm text-[oklch(58%_0.02_245)]">{{ formatDate(item.tweet?.createdAtISO) }}</span>
+                <span class="text-sm text-muted">@{{ item.tweet?.author?.screenName }}</span>
+                <span class="text-sm text-muted">{{ formatDate(item.tweet?.createdAtISO) }}</span>
               </div>
               <p class="mt-2 whitespace-pre-wrap text-sm leading-6">{{ item.tweet?.text || "Source post unavailable" }}</p>
-              <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[oklch(47%_0.024_245)]">
+              <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
                 <span>{{ formatMetric(item.tweet?.metrics?.likes) }} likes</span>
                 <span>{{ formatMetric(item.tweet?.metrics?.replies) }} replies</span>
                 <span>{{ formatMetric(item.tweet?.metrics?.retweets) }} reposts</span>
@@ -307,7 +301,7 @@ onMounted(loadHistory);
               </div>
               <a
                 v-if="item.postUrl"
-                class="mt-3 inline-flex h-8 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-semibold hover:bg-[oklch(94%_0.007_245)]"
+                class="mt-3 inline-flex h-8 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-semibold hover:bg-paper-shade"
                 :href="item.postUrl"
                 rel="noreferrer"
                 target="_blank"
@@ -324,7 +318,7 @@ onMounted(loadHistory);
                   <label
                     v-for="(draft, draftIndex) in item.draftOptions"
                     :key="`${item.id}-${draftIndex}`"
-                    class="flex cursor-pointer gap-3 rounded-md border border-[oklch(84%_0.014_245)] bg-[oklch(99%_0.004_245)] p-3 hover:bg-[oklch(96%_0.006_245)]"
+                    class="flex cursor-pointer gap-3 rounded-sm border border-rule bg-paper p-3 hover:bg-paper"
                   >
                     <input
                       v-model="item.draft"
@@ -341,20 +335,20 @@ onMounted(loadHistory);
                 <span class="font-medium">Editable final comment</span>
               <textarea
                 v-model="item.draft"
-                class="min-h-20 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 py-2 leading-5"
+                class="min-h-20 rounded-sm border border-rule-strong bg-paper px-3 py-2 leading-5"
               ></textarea>
               </label>
             </div>
 
-            <div class="mt-4 rounded-md bg-[oklch(94%_0.007_245)] px-3 py-2 font-mono text-xs text-[oklch(38%_0.02_245)]">
+            <div class="mt-4 rounded-sm bg-paper-shade px-3 py-2 font-mono text-xs text-ink-secondary">
               {{ recommendationCommand(item) }}
             </div>
 
             <div class="mt-4 flex flex-wrap gap-2">
               <button
                 v-if="item.action === 'like'"
-                class="inline-flex h-9 items-center gap-2 rounded-md bg-[oklch(58%_0.13_245)] px-3 text-sm font-semibold text-[oklch(98%_0.004_245)] hover:bg-[oklch(52%_0.14_245)] disabled:cursor-not-allowed disabled:opacity-55"
-                :disabled="actionLoadingId === item.id"
+                class="inline-flex h-9 items-center gap-2 rounded-sm bg-ink px-3 text-sm font-semibold text-paper hover:bg-ink-hover disabled:cursor-not-allowed disabled:opacity-55"
+                :disabled="Boolean(actionLoadingId)"
                 type="button"
                 @click="approve(item)"
               >
@@ -363,18 +357,27 @@ onMounted(loadHistory);
               </button>
               <button
                 v-else
-                class="inline-flex h-9 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-semibold hover:bg-[oklch(94%_0.007_245)] disabled:cursor-not-allowed disabled:opacity-55"
-                :disabled="actionLoadingId === item.id"
+                class="inline-flex h-9 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-semibold hover:bg-paper-shade disabled:cursor-not-allowed disabled:opacity-55"
+                :disabled="Boolean(actionLoadingId)"
                 type="button"
-                @click="likePost(item)"
+                @click="approve(item, 'like')"
               >
                 <Heart :size="16" aria-hidden="true" />
                 Like Post
               </button>
               <button
+                class="inline-flex h-9 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-semibold hover:bg-paper-shade disabled:cursor-not-allowed disabled:opacity-55"
+                :disabled="Boolean(actionLoadingId) || bookmarkedTweetIds.has(item.tweet_id)"
+                type="button"
+                @click="approve(item, 'bookmark')"
+              >
+                <Bookmark :size="16" aria-hidden="true" />
+                {{ bookmarkedTweetIds.has(item.tweet_id) ? "Bookmarked" : actionLoadingId === item.id ? "Working…" : "Bookmark" }}
+              </button>
+              <button
                 v-if="item.action !== 'like'"
-                class="inline-flex h-9 items-center gap-2 rounded-md bg-[oklch(58%_0.13_245)] px-3 text-sm font-semibold text-[oklch(98%_0.004_245)] hover:bg-[oklch(52%_0.14_245)] disabled:cursor-not-allowed disabled:opacity-55"
-                :disabled="actionLoadingId === item.id"
+                class="inline-flex h-9 items-center gap-2 rounded-sm bg-ink px-3 text-sm font-semibold text-paper hover:bg-ink-hover disabled:cursor-not-allowed disabled:opacity-55"
+                :disabled="Boolean(actionLoadingId)"
                 type="button"
                 @click="approve(item)"
               >
@@ -382,8 +385,8 @@ onMounted(loadHistory);
                 Approve {{ growthActionLabel(item.action) }}
               </button>
               <button
-                class="inline-flex h-9 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-semibold hover:bg-[oklch(94%_0.007_245)] disabled:cursor-not-allowed disabled:opacity-55"
-                :disabled="actionLoadingId === item.id"
+                class="inline-flex h-9 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-semibold hover:bg-paper-shade disabled:cursor-not-allowed disabled:opacity-55"
+                :disabled="Boolean(actionLoadingId)"
                 type="button"
                 @click="reject(item)"
               >
@@ -394,10 +397,10 @@ onMounted(loadHistory);
           </article>
         </div>
 
-        <div v-else-if="candidates.length" class="grid min-h-72 place-items-center rounded-md border border-dashed border-[oklch(82%_0.014_245)] text-center">
+        <div v-else-if="candidates.length" class="manuscript-empty">
           <div class="max-w-sm">
             <div class="font-semibold">{{ recommendations.length ? "Only skip suggestions found" : "Candidates loaded" }}</div>
-            <p class="mt-1 text-sm leading-6 text-[oklch(48%_0.024_245)]">
+            <p class="mt-1 text-sm leading-6 text-muted">
               {{
                 recommendations.length
                   ? "DeepSeek did not find any like or comment actions worth showing. Adjust the search query or try again later."
@@ -407,10 +410,10 @@ onMounted(loadHistory);
           </div>
         </div>
 
-        <div v-else class="grid min-h-72 place-items-center rounded-md border border-dashed border-[oklch(82%_0.014_245)] text-center">
+        <div v-else class="manuscript-empty">
           <div class="max-w-sm">
             <div class="font-semibold">Discover posts to start</div>
-            <p class="mt-1 text-sm leading-6 text-[oklch(48%_0.024_245)]">
+            <p class="mt-1 text-sm leading-6 text-muted">
               Search for AI, startup, software engineering, and founder conversations, then ask DeepSeek to rank them.
             </p>
           </div>
@@ -418,31 +421,31 @@ onMounted(loadHistory);
       </div>
     </section>
 
-    <aside class="border-t border-[oklch(87%_0.011_245)] bg-[oklch(96%_0.006_245)] p-4 xl:border-l xl:border-t-0">
-      <div class="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[oklch(47%_0.024_245)]">
+    <aside class="manuscript-history" aria-label="Action history">
+      <div class="history-heading flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted">
         <History :size="14" aria-hidden="true" />
         Action history
       </div>
-      <div v-if="history.length" class="grid gap-3">
+      <div v-if="history.length" class="history-list" tabindex="0" aria-label="Past actions">
         <div
           v-for="record in history"
           :key="record.id"
-          class="rounded-md border border-[oklch(84%_0.014_245)] bg-[oklch(99%_0.004_245)] p-3 text-sm"
+          class="history-record text-sm"
         >
           <div class="flex items-center justify-between gap-3">
             <span class="font-semibold">{{ growthActionLabel(record.action) }}</span>
             <span
-              class="rounded-md px-2 py-1 text-xs font-semibold"
-              :class="record.status === 'approved' ? 'bg-[oklch(94%_0.034_155)] text-[oklch(34%_0.08_155)]' : 'bg-[oklch(94%_0.01_245)] text-[oklch(45%_0.024_245)]'"
+              class="rounded-sm px-2 py-1 text-xs font-semibold"
+              :class="record.status === 'approved' ? 'bg-success-wash text-success' : 'bg-paper-shade text-muted'"
             >
               {{ record.status }}
             </span>
           </div>
-          <div class="mt-2 font-mono text-xs text-[oklch(48%_0.024_245)]">{{ record.tweet_id }}</div>
+          <div class="mt-2 font-mono text-xs text-muted">{{ record.tweet_id }}</div>
           <p v-if="record.comment_text" class="mt-2 leading-5">{{ record.comment_text }}</p>
         </div>
       </div>
-      <div v-else class="rounded-md border border-dashed border-[oklch(82%_0.014_245)] p-4 text-sm text-[oklch(48%_0.024_245)]">
+      <div v-else class="rounded-sm border border-dashed border-rule-strong p-4 text-sm text-muted">
         Approved and rejected recommendations will appear here.
       </div>
     </aside>

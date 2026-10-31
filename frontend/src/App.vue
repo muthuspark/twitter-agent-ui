@@ -4,7 +4,6 @@ import {
   AlertCircle,
   Bookmark,
   Braces,
-  CheckCircle2,
   Clipboard,
   ExternalLink,
   Heart,
@@ -19,9 +18,10 @@ import { computed, onMounted, ref, watch } from "vue";
 import AnalyticsDashboard from "./components/AnalyticsDashboard.vue";
 import GrowthMode from "./components/GrowthMode.vue";
 import PostIdeas from "./components/PostIdeas.vue";
+import Feeds from "./components/Feeds.vue";
 import {
   buildCommandPreview,
-  buildTweetLikePayload,
+  buildTweetActionPayload,
   defaultOptionsForPreset,
   formatDate,
   formatMetric,
@@ -49,6 +49,8 @@ const error = ref("");
 const result = ref(null);
 const selectedTweetId = ref(null);
 const tweetActionLoadingId = ref(null);
+const tweetAction = ref(null);
+const bookmarkedTweetIds = ref(new Set());
 const bulkLikeLoading = ref(false);
 const bulkLikeCompleted = ref(0);
 const bulkLikeTotal = ref(0);
@@ -81,7 +83,7 @@ const bulkLikeLabel = computed(() => {
 const rawJson = computed(() => JSON.stringify(result.value?.data ?? result.value, null, 2));
 
 watch(
-  [selectedPresetId, options, result, selectedTweetId, rawVisible, lastRunMs, likedTweetIds],
+  [selectedPresetId, options, result, selectedTweetId, rawVisible, lastRunMs, likedTweetIds, bookmarkedTweetIds],
   () => {
     if (cacheReady.value) persistWorkbenchCache();
   },
@@ -151,24 +153,27 @@ async function copyCommand() {
   }, 1600);
 }
 
-async function likeTweet(tweet) {
+async function runTweetAction(tweet, action) {
   if (!tweet?.id || tweetActionLoadingId.value) return;
   tweetActionLoadingId.value = tweet.id;
+  tweetAction.value = action;
   error.value = "";
   try {
     const response = await fetch("/api/growth/approve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildTweetLikePayload(tweet)),
+      body: JSON.stringify(buildTweetActionPayload(tweet, action)),
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.detail || "Unable to like post");
-    likedTweetIds.value = new Set([...likedTweetIds.value, tweet.id]);
+    if (!response.ok) throw new Error(body.detail || `Unable to ${action} post`);
+    const completedIds = action === "bookmark" ? bookmarkedTweetIds : likedTweetIds;
+    completedIds.value = new Set([...completedIds.value, tweet.id]);
     persistWorkbenchCache();
   } catch (failure) {
     error.value = failure.message;
   } finally {
     tweetActionLoadingId.value = null;
+    tweetAction.value = null;
   }
 }
 
@@ -184,10 +189,11 @@ async function likeLoadedLowLikeTweets() {
   try {
     for (const tweet of queue) {
       tweetActionLoadingId.value = tweet.id;
+      tweetAction.value = "like";
       const response = await fetch("/api/growth/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildTweetLikePayload(tweet)),
+        body: JSON.stringify(buildTweetActionPayload(tweet)),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.detail || "Unable to like post");
@@ -200,6 +206,7 @@ async function likeLoadedLowLikeTweets() {
     error.value = failure.message;
   } finally {
     tweetActionLoadingId.value = null;
+    tweetAction.value = null;
     bulkLikeLoading.value = false;
   }
 }
@@ -213,6 +220,7 @@ function currentWorkbenchCacheState() {
     rawVisible: rawVisible.value,
     lastRunMs: lastRunMs.value,
     likedTweetIds: [...likedTweetIds.value],
+    bookmarkedTweetIds: [...bookmarkedTweetIds.value],
   };
 }
 
@@ -230,6 +238,7 @@ function restoreWorkbenchCache() {
   rawVisible.value = cached.rawVisible;
   lastRunMs.value = cached.lastRunMs;
   likedTweetIds.value = new Set(cached.likedTweetIds);
+  bookmarkedTweetIds.value = new Set(cached.bookmarkedTweetIds);
   return true;
 }
 
@@ -244,69 +253,74 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen px-4 py-4 text-[oklch(24%_0.018_245)] sm:px-6 lg:px-8">
-    <div class="mx-auto flex max-w-[1540px] flex-col gap-4">
+  <div class="manuscript-app min-h-screen px-4 py-6 text-ink sm:px-6 lg:px-10">
+    <div class="manuscript-shell">
       <header
-        class="flex flex-col gap-3 border-b border-[oklch(86%_0.012_245)] pb-4 lg:flex-row lg:items-center lg:justify-between"
+        class="manuscript-header"
       >
-        <div>
-          <div class="flex items-center gap-3">
-            <div
-              class="grid h-9 w-9 place-items-center rounded-md bg-[oklch(23%_0.016_245)] text-[oklch(96%_0.006_245)]"
-            >
-              <Braces :size="18" aria-hidden="true" />
-            </div>
-            <div>
-              <h1 class="text-xl font-semibold tracking-normal">Twitter CLI Workbench</h1>
-              <p class="text-sm text-[oklch(48%_0.024_245)]">
-                Run local <span class="font-mono">twitter</span> commands and inspect live structured output.
-              </p>
-            </div>
-          </div>
+        <div class="manuscript-brand">
+          <h1 class="text-2xl font-bold tracking-tight">Twitter CLI Workbench</h1>
+          <p class="mt-1 text-xs text-muted">
+            Run local <span class="font-mono">twitter</span> commands and inspect live structured output.
+          </p>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="mr-1 flex rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] p-1">
+        <nav aria-label="Main navigation" class="manuscript-nav">
             <button
-              class="h-7 rounded px-3 text-sm font-medium"
-              :class="activeTab === 'workbench' ? 'bg-[oklch(90%_0.038_245)] text-[oklch(30%_0.08_245)]' : 'text-[oklch(48%_0.024_245)] hover:bg-[oklch(94%_0.007_245)]'"
+              class="manuscript-tab"
+              :class="{ 'is-active': activeTab === 'workbench' }"
+              :aria-current="activeTab === 'workbench' ? 'page' : undefined"
               type="button"
               @click="activeTab = 'workbench'"
             >
               Workbench
             </button>
             <button
-              class="h-7 rounded px-3 text-sm font-medium"
-              :class="activeTab === 'growth' ? 'bg-[oklch(90%_0.038_245)] text-[oklch(30%_0.08_245)]' : 'text-[oklch(48%_0.024_245)] hover:bg-[oklch(94%_0.007_245)]'"
+              class="manuscript-tab"
+              :class="{ 'is-active': activeTab === 'feeds' }"
+              :aria-current="activeTab === 'feeds' ? 'page' : undefined"
+              type="button"
+              @click="activeTab = 'feeds'"
+            >
+              Feeds
+            </button>
+            <button
+              class="manuscript-tab"
+              :class="{ 'is-active': activeTab === 'growth' }"
+              :aria-current="activeTab === 'growth' ? 'page' : undefined"
               type="button"
               @click="activeTab = 'growth'"
             >
               Growth Mode
             </button>
             <button
-              class="h-7 rounded px-3 text-sm font-medium"
-              :class="activeTab === 'postIdeas' ? 'bg-[oklch(90%_0.038_245)] text-[oklch(30%_0.08_245)]' : 'text-[oklch(48%_0.024_245)] hover:bg-[oklch(94%_0.007_245)]'"
+              class="manuscript-tab"
+              :class="{ 'is-active': activeTab === 'postIdeas' }"
+              :aria-current="activeTab === 'postIdeas' ? 'page' : undefined"
               type="button"
               @click="activeTab = 'postIdeas'"
             >
               Post Ideas
             </button>
             <button
-              class="h-7 rounded px-3 text-sm font-medium"
-              :class="activeTab === 'analytics' ? 'bg-[oklch(90%_0.038_245)] text-[oklch(30%_0.08_245)]' : 'text-[oklch(48%_0.024_245)] hover:bg-[oklch(94%_0.007_245)]'"
+              class="manuscript-tab"
+              :class="{ 'is-active': activeTab === 'analytics' }"
+              :aria-current="activeTab === 'analytics' ? 'page' : undefined"
               type="button"
               @click="activeTab = 'analytics'"
             >
               Analytics
             </button>
-          </div>
+        </nav>
+        <div class="manuscript-header-actions">
           <span
-            class="inline-flex h-8 items-center gap-2 rounded-md border border-[oklch(82%_0.026_155)] bg-[oklch(94%_0.034_155)] px-3 text-sm font-medium text-[oklch(34%_0.08_155)]"
+            class="manuscript-status inline-flex h-8 items-center gap-2 text-xs text-muted"
           >
-            <CheckCircle2 :size="15" aria-hidden="true" />
+            <span class="h-2 w-2 rounded-full bg-success" aria-hidden="true"></span>
             Local CLI
           </span>
           <button
-            class="inline-flex h-8 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(98%_0.004_245)] px-3 text-sm font-medium hover:bg-[oklch(94%_0.007_245)] disabled:cursor-not-allowed disabled:opacity-55"
+            v-if="activeTab !== 'feeds'"
+            class="inline-flex h-8 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-medium hover:bg-paper-shade disabled:cursor-not-allowed disabled:opacity-55"
             :disabled="loading || bootLoading"
             type="button"
             @click="runCommand"
@@ -319,21 +333,21 @@ onMounted(async () => {
 
       <main
         v-if="activeTab === 'workbench'"
-        class="grid min-h-[calc(100vh-112px)] overflow-hidden rounded-lg border border-[oklch(85%_0.012_245)] bg-[oklch(98%_0.004_245)] shadow-sm lg:grid-cols-[260px_minmax(0,1fr)]"
+        class="manuscript-layout workbench-layout"
       >
-        <aside class="border-b border-[oklch(87%_0.011_245)] bg-[oklch(94%_0.007_245)] p-4 lg:border-b-0 lg:border-r">
-          <div class="mb-3 text-xs font-semibold uppercase tracking-[0.08em] text-[oklch(47%_0.024_245)]">
+        <aside class="manuscript-sidebar">
+          <div class="mb-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted">
             Presets
           </div>
-          <div class="grid gap-2">
+          <div class="preset-list">
             <button
               v-for="preset in presets"
               :key="preset.id"
-              class="flex min-h-12 items-center gap-3 rounded-md border px-3 text-left transition hover:bg-[oklch(98%_0.004_245)]"
+              class="flex min-h-12 items-center gap-3 rounded-sm border px-3 text-left transition hover:bg-paper"
               :class="
                 preset.id === selectedPresetId
-                  ? 'border-[oklch(74%_0.07_245)] bg-[oklch(90%_0.038_245)] text-[oklch(30%_0.08_245)]'
-                  : 'border-transparent bg-transparent text-[oklch(35%_0.02_245)]'
+                  ? 'border-accent bg-accent-wash text-accent'
+                  : 'border-transparent bg-transparent text-ink-secondary'
               "
               type="button"
               @click="selectPreset(preset.id)"
@@ -341,21 +355,21 @@ onMounted(async () => {
               <component :is="iconMap[preset.id] || Braces" :size="17" aria-hidden="true" />
               <span>
                 <span class="block text-sm font-semibold">{{ preset.label }}</span>
-                <span class="block text-xs text-[oklch(49%_0.024_245)]">{{ preset.description }}</span>
+                <span class="preset-description block text-xs text-muted">{{ preset.description }}</span>
               </span>
             </button>
           </div>
 
-          <div class="mt-6 text-xs font-semibold uppercase tracking-[0.08em] text-[oklch(47%_0.024_245)]">
+          <div class="mt-6 text-xs font-semibold uppercase tracking-[0.08em] text-muted">
             Options
           </div>
-          <div class="mt-3 grid gap-3">
+          <div class="preset-options mt-3 grid gap-3">
             <label v-for="field in selectedPreset?.fields" :key="field.name" class="grid gap-1.5 text-sm">
               <span class="font-medium">{{ field.label }}</span>
               <input
                 v-if="field.type === 'number'"
                 v-model.number="options[field.name]"
-                class="h-9 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3"
+                class="h-9 rounded-sm border border-rule-strong bg-paper px-3"
                 :max="field.max"
                 :min="field.min"
                 type="number"
@@ -363,32 +377,33 @@ onMounted(async () => {
               <input
                 v-else
                 v-model="options[field.name]"
-                class="h-9 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3"
+                class="h-9 rounded-sm border border-rule-strong bg-paper px-3"
                 :placeholder="field.required ? 'Required' : ''"
                 type="text"
               />
             </label>
-            <p v-if="!selectedPreset?.fields?.length" class="text-sm text-[oklch(48%_0.024_245)]">
+            <p v-if="!selectedPreset?.fields?.length" class="text-sm text-muted">
               No options required for this command.
             </p>
           </div>
         </aside>
 
-        <section class="grid min-h-[560px] grid-rows-[auto_auto_1fr] gap-4 overflow-hidden p-4">
-          <div class="rounded-md border border-[oklch(84%_0.014_245)] bg-[oklch(99%_0.004_245)] p-3">
-            <div class="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[oklch(47%_0.024_245)]">
+        <section class="manuscript-content">
+          <div class="workbench-command">
+            <h2 class="mb-5 text-2xl font-bold">{{ selectedPreset?.label || "Workbench" }}</h2>
+            <div class="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted">
               Command
             </div>
             <div
-              class="overflow-x-auto rounded-md bg-[oklch(21%_0.015_245)] px-3 py-2 font-mono text-sm text-[oklch(91%_0.01_245)]"
+              class="overflow-x-auto rounded-sm command-sheet bg-paper-shade px-3 py-2 font-mono text-sm text-ink"
             >
               {{ commandPreview }}
             </div>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2">
+          <div class="workbench-toolbar flex flex-wrap items-center gap-2">
             <button
-              class="inline-flex h-9 items-center gap-2 rounded-md bg-[oklch(58%_0.13_245)] px-4 text-sm font-semibold text-[oklch(98%_0.004_245)] hover:bg-[oklch(52%_0.14_245)] disabled:cursor-not-allowed disabled:opacity-55"
+              class="inline-flex h-9 items-center gap-2 rounded-sm bg-ink px-4 text-sm font-semibold text-paper hover:bg-ink-hover disabled:cursor-not-allowed disabled:opacity-55"
               :disabled="loading || bootLoading"
               type="button"
               @click="runCommand"
@@ -397,15 +412,15 @@ onMounted(async () => {
               {{ loading ? "Running" : "Run" }}
             </button>
             <button
-              class="inline-flex h-9 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-medium hover:bg-[oklch(94%_0.007_245)]"
+              class="inline-flex h-9 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-medium hover:bg-paper-shade"
               type="button"
               @click="rawVisible = !rawVisible"
             >
               <Braces :size="16" aria-hidden="true" />
-              {{ rawVisible ? "Cards" : "JSON" }}
+              {{ rawVisible ? "Results" : "Raw JSON" }}
             </button>
             <button
-              class="inline-flex h-9 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-medium hover:bg-[oklch(94%_0.007_245)]"
+              class="inline-flex h-9 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-medium hover:bg-paper-shade"
               type="button"
               @click="copyCommand"
             >
@@ -413,7 +428,7 @@ onMounted(async () => {
               {{ copied ? "Copied" : "Copy command" }}
             </button>
             <button
-              class="inline-flex h-9 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-medium hover:bg-[oklch(94%_0.007_245)] disabled:cursor-not-allowed disabled:opacity-55"
+              class="inline-flex h-9 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-medium hover:bg-paper-shade disabled:cursor-not-allowed disabled:opacity-55"
               :disabled="loading || bootLoading || bulkLikeLoading || tweetActionLoadingId || !lowLikeTweets.length"
               type="button"
               @click="likeLoadedLowLikeTweets"
@@ -421,15 +436,15 @@ onMounted(async () => {
               <Heart :size="16" aria-hidden="true" />
               {{ bulkLikeLabel }}
             </button>
-            <span class="ml-auto text-sm text-[oklch(48%_0.024_245)]" v-if="lastRunMs">
+            <span class="run-timing ml-auto text-xs text-muted" v-if="lastRunMs">
               Last run {{ (lastRunMs / 1000).toFixed(1) }}s
             </span>
           </div>
 
-          <div class="min-h-0 overflow-auto pr-1">
+          <div class="results-region">
             <div
               v-if="error"
-              class="flex items-start gap-3 rounded-md border border-[oklch(79%_0.052_30)] bg-[oklch(96%_0.025_30)] p-4 text-sm text-[oklch(36%_0.075_30)]"
+              class="flex items-start gap-3 rounded-sm border border-danger-rule bg-danger-wash p-4 text-sm text-danger"
             >
               <AlertCircle class="mt-0.5 shrink-0" :size="18" aria-hidden="true" />
               <div>
@@ -442,55 +457,43 @@ onMounted(async () => {
               <div
                 v-for="index in 4"
                 :key="index"
-                class="h-28 animate-pulse rounded-md border border-[oklch(87%_0.012_245)] bg-[oklch(95%_0.007_245)]"
+                class="h-28 animate-pulse rounded-sm border border-rule bg-paper-shade"
               ></div>
             </div>
 
             <pre
               v-else-if="rawVisible && result"
-              class="min-h-full overflow-auto rounded-md bg-[oklch(21%_0.015_245)] p-4 font-mono text-xs leading-5 text-[oklch(91%_0.01_245)]"
+              class="min-h-full overflow-auto rounded-sm command-sheet bg-paper-shade p-4 font-mono text-xs leading-5 text-ink"
               >{{ rawJson }}</pre
             >
 
-            <div v-else-if="tweets.length" class="grid gap-3">
+            <div v-else-if="tweets.length" class="manuscript-posts">
               <article
                 v-for="tweet in tweets"
                 :key="tweet.id"
-                class="cursor-pointer rounded-md border bg-[oklch(99%_0.004_245)] p-4 transition hover:border-[oklch(74%_0.07_245)]"
+                class="manuscript-post cursor-pointer border-b bg-paper py-6 transition hover:bg-paper-shade"
                 :class="
                   selectedTweetId === tweet.id
-                    ? 'border-[oklch(66%_0.1_245)]'
-                    : 'border-[oklch(86%_0.012_245)]'
+                    ? 'border-accent bg-accent-wash'
+                    : 'border-rule'
                 "
                 @click="selectedTweetId = tweet.id"
               >
                 <div class="flex items-start gap-3">
-                  <img
-                    v-if="tweet.author?.profileImageUrl"
-                    class="h-10 w-10 rounded-md"
-                    :src="tweet.author.profileImageUrl"
-                    alt=""
-                  />
-                  <div
-                    v-else
-                    class="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-[oklch(90%_0.038_245)] font-semibold"
-                  >
-                    {{ tweet.author?.name?.slice(0, 1) || "T" }}
-                  </div>
                   <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <strong class="text-sm">{{ tweet.author?.name || "Unknown" }}</strong>
-                      <span class="text-sm text-[oklch(48%_0.024_245)]">@{{ tweet.author?.screenName }}</span>
-                      <span class="text-sm text-[oklch(58%_0.02_245)]">{{ formatDate(tweet.createdAtISO || tweet.createdAtLocal) }}</span>
+                      <span class="text-sm text-muted">@{{ tweet.author?.screenName }}</span>
+                      <span class="text-sm text-muted">{{ formatDate(tweet.createdAtISO || tweet.createdAtLocal) }}</span>
                       <span
                         v-if="tweet.author?.verified"
-                        class="rounded bg-[oklch(91%_0.045_245)] px-1.5 py-0.5 text-xs font-medium text-[oklch(34%_0.08_245)]"
+                        class="rounded bg-accent-wash px-1.5 py-0.5 text-xs font-medium text-accent"
                       >
                         verified
                       </span>
                     </div>
                     <p class="mt-2 whitespace-pre-wrap text-sm leading-6">{{ tweet.text }}</p>
-                    <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[oklch(47%_0.024_245)]">
+                    <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
                       <span>{{ formatMetric(tweet.metrics?.likes) }} likes</span>
                       <span>{{ formatMetric(tweet.metrics?.retweets) }} reposts</span>
                       <span>{{ formatMetric(tweet.metrics?.replies) }} replies</span>
@@ -499,23 +502,32 @@ onMounted(async () => {
                     </div>
                     <div class="mt-3 flex flex-wrap gap-2">
                       <button
-                        class="inline-flex h-8 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-semibold hover:bg-[oklch(94%_0.007_245)] disabled:cursor-not-allowed disabled:opacity-55"
-                        :disabled="tweetActionLoadingId === tweet.id || likedTweetIds.has(tweet.id)"
+                        class="inline-flex h-8 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-semibold hover:bg-paper-shade disabled:cursor-not-allowed disabled:opacity-55"
+                        :disabled="Boolean(tweetActionLoadingId) || likedTweetIds.has(tweet.id)"
                         type="button"
-                        @click.stop="likeTweet(tweet)"
+                        @click.stop="runTweetAction(tweet, 'like')"
                       >
                         <Heart :size="15" aria-hidden="true" />
                         {{
                           likedTweetIds.has(tweet.id)
                             ? "Liked"
-                            : tweetActionLoadingId === tweet.id
+                            : tweetActionLoadingId === tweet.id && tweetAction === 'like'
                               ? "Liking"
                               : "Like Post"
                         }}
                       </button>
+                      <button
+                        class="inline-flex h-8 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-semibold hover:bg-paper-shade disabled:cursor-not-allowed disabled:opacity-55"
+                        :disabled="Boolean(tweetActionLoadingId) || bookmarkedTweetIds.has(tweet.id)"
+                        type="button"
+                        @click.stop="runTweetAction(tweet, 'bookmark')"
+                      >
+                        <Bookmark :size="15" aria-hidden="true" />
+                        {{ bookmarkedTweetIds.has(tweet.id) ? "Bookmarked" : tweetActionLoadingId === tweet.id && tweetAction === 'bookmark' ? "Bookmarking" : "Bookmark" }}
+                      </button>
                       <a
                         v-if="tweetUrl(tweet)"
-                        class="inline-flex h-8 items-center gap-2 rounded-md border border-[oklch(82%_0.014_245)] bg-[oklch(99%_0.004_245)] px-3 text-sm font-semibold hover:bg-[oklch(94%_0.007_245)]"
+                        class="inline-flex h-8 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-semibold hover:bg-paper-shade"
                         :href="tweetUrl(tweet)"
                         rel="noreferrer"
                         target="_blank"
@@ -532,18 +544,18 @@ onMounted(async () => {
 
             <div
               v-else-if="normalized?.kind === 'json'"
-              class="rounded-md border border-[oklch(86%_0.012_245)] bg-[oklch(99%_0.004_245)] p-4"
+              class="rounded-sm border border-rule bg-paper p-4"
             >
               <pre class="overflow-auto font-mono text-xs leading-5">{{ JSON.stringify(normalized.value, null, 2) }}</pre>
             </div>
 
             <div
               v-else
-              class="grid min-h-64 place-items-center rounded-md border border-dashed border-[oklch(82%_0.014_245)] text-center"
+              class="manuscript-empty"
             >
               <div>
                 <div class="font-semibold">No output yet</div>
-                <p class="mt-1 text-sm text-[oklch(48%_0.024_245)]">Run a preset to fetch live CLI data.</p>
+                <p class="mt-1 text-sm text-muted">Run a preset to fetch live CLI data.</p>
               </div>
             </div>
           </div>
@@ -551,7 +563,10 @@ onMounted(async () => {
       </main>
       <GrowthMode v-else-if="activeTab === 'growth'" />
       <PostIdeas v-else-if="activeTab === 'postIdeas'" />
-      <AnalyticsDashboard v-else />
+      <AnalyticsDashboard v-else-if="activeTab === 'analytics'" />
+      <KeepAlive>
+        <Feeds v-if="activeTab === 'feeds'" />
+      </KeepAlive>
     </div>
   </div>
 </template>

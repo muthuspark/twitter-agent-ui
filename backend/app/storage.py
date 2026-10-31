@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -167,6 +168,50 @@ class GrowthStore:
                 """
             ).fetchall()
         return {str(row["tweet_id"]) for row in rows}
+
+    def recent_liked_posts(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                select tweet_id, metadata_json from actions
+                where action = 'like' and status = 'approved'
+                order by id desc
+                """
+            ).fetchall()
+        posts: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            source = json.loads(row["metadata_json"]).get("source_tweet") or {}
+            if source.get("text") and row["tweet_id"] not in posts:
+                posts[row["tweet_id"]] = {"id": row["tweet_id"], "text": source["text"][:4000]}
+            if len(posts) >= limit:
+                break
+        return list(posts.values())
+
+    def recent_interest_posts(
+        self, action: str, since: datetime, until: datetime, limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                select tweet_id, metadata_json, created_at from actions
+                where action = ? and status = 'approved'
+                  and datetime(created_at) >= datetime(?)
+                  and datetime(created_at) <= datetime(?)
+                order by created_at desc, id desc
+                """,
+                (action, since.isoformat(), until.isoformat()),
+            ).fetchall()
+        posts = {}
+        for row in rows:
+            source = json.loads(row["metadata_json"]).get("source_tweet") or {}
+            if source.get("text") and row["tweet_id"] not in posts:
+                posts[row["tweet_id"]] = {
+                    "id": row["tweet_id"], "text": str(source["text"])[:4000],
+                    "timestamp": row["created_at"], "timestamp_basis": "action_time",
+                }
+            if len(posts) >= limit:
+                break
+        return list(posts.values())
 
     def preference_memory(self, limit: int = 30) -> dict[str, Any]:
         records = list(reversed(self.history(limit=limit)))

@@ -35,8 +35,8 @@ def build_growth_action_command(action: str, tweet_id: str, comment_text: str | 
     if not tweet_id:
         raise GrowthValidationError("Tweet id is required")
 
-    if action == "like":
-        return ["twitter", "like", tweet_id, "--json"]
+    if action in {"like", "bookmark"}:
+        return ["twitter", action, tweet_id, "--json"]
 
     if action == "comment":
         comment = str(comment_text or "").strip()
