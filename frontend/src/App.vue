@@ -85,7 +85,13 @@ watch(activeTab, (tab) => {
   >
     <div class="manuscript-shell">
       <header class="manuscript-header">
-        <h1 class="sr-only">Twitter Agent</h1>
+        <div class="app-identity">
+          <span class="app-mark" aria-hidden="true">Ta</span>
+          <div>
+            <h1>Twitter Agent</h1>
+            <p>Your reading &amp; writing workspace.</p>
+          </div>
+        </div>
         <nav aria-label="Main navigation" class="manuscript-nav">
           <button
             v-for="view in views"

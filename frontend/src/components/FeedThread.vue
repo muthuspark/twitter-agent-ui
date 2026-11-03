@@ -88,7 +88,7 @@ function stop() {
 
 function fitPanel() {
   if (!panel.value) return;
-  if (window.matchMedia("(max-width: 1099px)").matches) {
+  if (window.matchMedia("(max-width: 899px)").matches) {
     panel.value.style.removeProperty("max-height");
     return;
   }
@@ -151,11 +151,9 @@ onBeforeUnmount(deactivate);
     <header class="thread-heading">
       <div>
         <h2 id="feed-thread-heading" tabindex="-1" class="text-xl font-bold">
-          Thread &amp; replies
+          Thread<span v-if="conversation.length">, {{ conversation.length }} {{ conversation.length === 1 ? "reply" : "replies" }}</span>
         </h2>
-        <p class="mt-1 text-sm text-muted">
-          English only. Your block list applies here too.
-        </p>
+
       </div>
       <button
         type="button"
@@ -173,6 +171,7 @@ onBeforeUnmount(deactivate);
         v-for="tweet in displayedPosts"
         :key="tweet.id"
         class="feed-post thread-post"
+        :class="{ 'is-thread-source': String(tweet.id) === String(post.id) }"
         :data-post-id="tweet.id"
       >
         <p
@@ -182,6 +181,7 @@ onBeforeUnmount(deactivate);
           Selected post
         </p>
         <header class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span class="post-author-mark" aria-hidden="true">{{ (tweet.author?.name || tweet.author?.screenName || '?').slice(0, 2) }}</span>
           <strong class="text-base">{{
             tweet.author?.name || tweet.author?.screenName || "Unknown author"
           }}</strong>
