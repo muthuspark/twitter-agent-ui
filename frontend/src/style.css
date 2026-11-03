@@ -259,3 +259,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 @media (max-width: 639px) {
   .feed-block-nav-button { margin-left: 0; }
 }
+
+/* Navigation wraps as research tools are added, including on narrow screens. */
+.manuscript-nav { flex-wrap: wrap; column-gap: var(--space-xl); row-gap: 0; }
+.manuscript-tab { white-space: nowrap; }

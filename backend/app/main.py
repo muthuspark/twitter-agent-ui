@@ -1,10 +1,11 @@
 import os
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Query, Path as ApiPath
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import PlainTextResponse
 
 from app.analytics import AnalyticsConfigurationError, AnalyticsDataError, fetch_analytics_summary
 from app.config import load_environment
@@ -16,13 +17,15 @@ from app.codex_client import (
     CodexBusyError,
     analyze_with_codex,
     generate_post_ideas_with_codex,
+    curate_research_for_essay,
 )
+from app.editorial import EditorialContextError, load_editorial_context, essay_source
 from app.growth import GrowthValidationError, extract_tweet_candidates
 from app.storage import GrowthStore
 from app.interests import collect_interest_context
 from app.feed import fetch_feed_page
 from app.trends import ResearchError, fetch_trending_research
-from app.post_images import ImageGenerationError, start_image_job, get_image_job, ready_image_path
+from app.prospects import get_run as get_prospect_run, start_run as start_prospect_run, suggest_response
 from app.twitter_cli import (
     PRESETS,
     CliExecutionError,
@@ -56,6 +59,40 @@ def get_growth_store() -> GrowthStore:
     return GrowthStore(os.environ.get("GROWTH_DB_PATH", default_path))
 
 
+@app.post("/api/prospects/runs")
+def prospect_run_start():
+    return start_prospect_run()
+
+
+@app.get("/api/prospects/runs/latest")
+def prospect_run_latest():
+    return {"run": get_prospect_run()}
+
+
+@app.get("/api/prospects/runs/{run_id}")
+def prospect_run_status(run_id: str):
+    run = get_prospect_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Research run not found")
+    return run
+
+
+@app.post("/api/prospects/runs/{run_id}/response")
+def prospect_response(run_id: str, request: dict[str, Any]):
+    try:
+        return suggest_response(run_id, request.get("url", ""))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CodexBusyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CodexTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except CodexConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CodexError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 def analyze_candidates(
     candidates: list[dict[str, Any]],
     profile_focus: str,
@@ -76,6 +113,8 @@ def generate_post_ideas(
     recent_liked_posts: list[dict[str, Any]] | None = None,
     recent_bookmarked_posts: list[dict[str, Any]] | None = None,
     research_sources: list[dict[str, Any]] | None = None,
+    editorial_context: dict[str, Any] | None = None,
+    idea_type: str = 'mix',
 ) -> list[dict[str, Any]]:
     return generate_post_ideas_with_codex(
         profile_focus,
@@ -85,6 +124,8 @@ def generate_post_ideas(
         recent_liked_posts=recent_liked_posts,
         recent_bookmarked_posts=recent_bookmarked_posts,
         research_sources=research_sources,
+        editorial_context=editorial_context,
+        idea_type=idea_type,
     )
 
 
@@ -303,39 +344,64 @@ def growth_approve(request: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "record": record}
 
 
+def required_editorial_context():
+    try:
+        return load_editorial_context()
+    except EditorialContextError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/posts/editorial-direction")
+def editorial_direction():
+    return {"ok": True, "direction": required_editorial_context()}
+
+
+@app.get("/api/posts/essay", response_class=PlainTextResponse)
+def editorial_essay():
+    return required_editorial_context()["content"]
+
+
 @app.post("/api/posts/ideas")
 def post_ideas(request: dict[str, Any]) -> dict[str, Any]:
-    source_mode = str(request.get("source_mode") or "interests")
-    if source_mode not in {"trends", "interests"}:
-        raise HTTPException(status_code=422, detail="Choose trending research or recent interests.")
+    editorial = required_editorial_context()
+    source_mode = str(request.get("source_mode") or "trends")
+    if source_mode not in {"trends", "interests", "essay"}:
+        raise HTTPException(status_code=422, detail="Choose essay research, recent interests, or essay only.")
+    idea_type = str(request.get("idea_type") or "mix")
+    if idea_type not in {"mix", "thought_leadership", "insight", "project", "experiment", "evidence", "counterpoint"}:
+        raise HTTPException(status_code=422, detail="Choose a valid idea type.")
     profile_focus = str(request.get("profile_focus") or "").strip()
     themes = str(request.get("themes") or "").strip()
-    count = int(request.get("count", 5) or 5)
+    try:
+        count = max(1, min(8, int(request.get("count", 5) or 5)))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail="Ideas must be a number from 1 to 8.") from exc
     store = get_growth_store()
+    now = datetime.now(timezone.utc)
+    context = {"likes": [], "bookmarks": [], "since": (now - timedelta(days=7)).isoformat(), "until": now.isoformat(), "warning": None}
     research = None
     if source_mode == "trends":
         try:
-            research = fetch_trending_research()
-        except ResearchError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        profile_focus = profile_focus or "Technology and artificial intelligence"
-        context = {"likes": [], "bookmarks": [], "since": research["since"], "until": research["researched_at"], "warning": research["warning"]}
-    else:
+            research = fetch_trending_research(editorial_context=editorial)
+            context.update(since=research["since"], until=research["researched_at"], warning=research["warning"])
+        except ResearchError:
+            context["warning"] = "Recent research was unavailable. Drafts will draw only from your essay, without new factual claims."
+    elif source_mode == "interests":
         context = collect_interest_context(store, fetch_recent_liked_posts, fetch_recent_bookmarked_posts)
         if not context["likes"] and not context["bookmarks"]:
-            detail = "No eligible likes or bookmarks found for the last 48 hours. Try again after liking or saving posts."
+            detail = "No eligible likes or bookmarks found for the last 48 hours. Choose Essay only to draft directly from your essay."
             if context["warning"]:
                 detail += " " + context["warning"]
             raise HTTPException(status_code=422, detail=detail)
     try:
+        selected = curate_research_for_essay(research["sources"], editorial, themes) if research else []
+        if research and not selected:
+            context["warning"] = " ".join(filter(None, [context["warning"], "No recent sources had a direct connection to your essay. These drafts use the essay only."]))
+        sources = [essay_source(editorial), *selected]
         ideas = generate_post_ideas(
-            profile_focus,
-            themes,
-            preference_memory=store.preference_memory(),
-            count=count,
-            recent_liked_posts=context["likes"],
-            recent_bookmarked_posts=context["bookmarks"],
-            **({"research_sources": research["sources"]} if research else {}),
+            profile_focus, themes, preference_memory=store.preference_memory(), count=count,
+            recent_liked_posts=context["likes"], recent_bookmarked_posts=context["bookmarks"],
+            research_sources=sources, editorial_context=editorial, idea_type=idea_type,
         )
     except CodexTimeoutError as exc:
         raise HTTPException(status_code=504, detail=str(exc)) from exc
@@ -346,52 +412,25 @@ def post_ideas(request: dict[str, Any]) -> dict[str, Any]:
     except CodexError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    if research:
-        by_id = {source["id"]: source for source in research["sources"]}
-        grounded = []
-        for idea in ideas[:max(1, min(8, count))]:
-            ids = [source_id for source_id in dict.fromkeys(idea.get("source_ids", [])) if source_id in by_id]
-            if ids:
-                grounded.append({**idea, "source_ids": ids, "sources": [by_id[source_id] for source_id in ids]})
-        if not grounded:
-            raise HTTPException(status_code=502, detail="The generator returned drafts without valid research references. Please try again.")
-        ideas = grounded
-
+    by_id = {source["id"]: source for source in sources}
+    grounded = []
+    for idea in ideas[:count]:
+        connection = idea.get("essay_connection", "")
+        ids = [source_id for source_id in dict.fromkeys(idea.get("source_ids", [])) if source_id in by_id]
+        if ids and isinstance(connection, str) and len(connection.strip()) >= 20:
+            grounded.append({**idea, "source_ids": ids, "sources": [by_id[source_id] for source_id in ids], "essay_version": editorial["version"]})
+    if not grounded:
+        raise HTTPException(status_code=502, detail="Codex returned no drafts with a clear essay connection and valid references. Please try again.")
     return {
-        "ok": True, "ideas": ideas,
-        "liked_posts_used": len(context["likes"]),
-        "bookmarked_posts_used": len(context["bookmarks"]),
+        "ok": True, "ideas": grounded,
+        "liked_posts_used": len(context["likes"]), "bookmarked_posts_used": len(context["bookmarks"]),
         "unique_posts_used": len({post["id"] for post in context["likes"] + context["bookmarks"]}),
         "context_since": context["since"], "context_until": context["until"],
         "context_warning": context["warning"], "likes_warning": context["warning"],
-        "source_mode": source_mode,
-        "research_sources": research["sources"] if research else [],
+        "source_mode": source_mode, "research_sources": selected,
         "researched_at": research["researched_at"] if research else None,
+        "editorial_direction": {key: editorial[key] for key in ("title", "file", "version", "updated_at")},
     }
-
-
-@app.post("/api/posts/images")
-def create_post_image(request: dict[str, Any]) -> dict[str, Any]:
-    try:
-        return {"ok": True, "image": start_image_job(request.get("post_text"), request.get("title", ""))}
-    except ImageGenerationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@app.get("/api/posts/images/{image_id}")
-def post_image_status(image_id: str) -> dict[str, Any]:
-    try:
-        return {"ok": True, "image": get_image_job(image_id)}
-    except ImageGenerationError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@app.get("/api/posts/images/{image_id}/file")
-def post_image_file(image_id: str):
-    try:
-        return FileResponse(ready_image_path(image_id), media_type="image/jpeg")
-    except ImageGenerationError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/api/posts/approve")
@@ -399,17 +438,15 @@ def approve_post(request: dict[str, Any]) -> dict[str, Any]:
     post_text = str(request.get("post_text", "") or "").strip()
     metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
     try:
-        image_id = request.get("image_id")
-        if image_id:
-            image_path = ready_image_path(image_id)
-            result = run_post_action(post_text, image_path=str(image_path))
-            metadata = {**metadata, "image": {"id": image_id, "url": f"/api/posts/images/{image_id}/file"}}
-        else:
-            result = run_post_action(post_text)
+        post_idea = metadata.get('post_idea')
+        if isinstance(post_idea, dict) and post_idea.get('essay_version'):
+            if post_idea['essay_version'] != required_editorial_context()['version']:
+                raise GrowthValidationError('essay.md has changed since this draft was generated. Generate a fresh draft before posting.')
+        if request.get("image_id"):
+            raise GrowthValidationError('Image attachments are no longer supported. Refresh the app and approve the text-only draft.')
+        result = run_post_action(post_text)
         if isinstance(result.data, dict) and result.data.get("ok") is False:
             raise CliExecutionError("X did not publish this post. Check the session and retry.")
-    except ImageGenerationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except GrowthValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CliNotFoundError as exc:
@@ -420,10 +457,11 @@ def approve_post(request: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     result_data = result.data if isinstance(result.data, dict) else {"data": result.data}
+    post_data = result_data.get("data") if isinstance(result_data.get("data"), dict) else result_data
     tweet_id = str(
-        result_data.get("id")
-        or result_data.get("tweet_id")
-        or result_data.get("tweetId")
+        post_data.get("id")
+        or post_data.get("tweet_id")
+        or post_data.get("tweetId")
         or ""
     )
     record = get_growth_store().record_action(

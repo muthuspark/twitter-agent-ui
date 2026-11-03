@@ -152,16 +152,56 @@ def run_twitter_command(preset_id: str, options: dict[str, Any] | None = None) -
     except FileNotFoundError as exc:
         raise CliNotFoundError("The twitter CLI was not found on PATH") from exc
 
-    if completed.returncode != 0:
-        message = completed.stderr.strip() or completed.stdout.strip() or "Twitter CLI command failed"
-        raise CliExecutionError(message)
+    data = _parse_cli_response(completed)
+    return CliResult(command=command, data=data)
 
+
+def _parse_cli_response(completed: subprocess.CompletedProcess) -> Any:
+    # twitter-cli 0.8.5 prints cookie progress before its JSON for write commands.
+    # Only accept a complete JSON response at the end, never braces in a log line.
+    data = None
+    parsed = False
     try:
         data = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise InvalidCliOutputError("Twitter CLI returned invalid JSON") from exc
+        parsed = True
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+        offset = 0
+        for line in completed.stdout.splitlines(keepends=True):
+            candidate = line.lstrip()
+            if candidate.startswith(('{', '[')):
+                start = offset + len(line) - len(candidate)
+                try:
+                    value, end = decoder.raw_decode(completed.stdout, start)
+                    if not completed.stdout[end:].strip():
+                        data, parsed = value, True
+                        break
+                except json.JSONDecodeError:
+                    pass
+            offset += len(line)
 
-    return CliResult(command=command, data=data)
+    if completed.returncode != 0 or (isinstance(data, dict) and data.get('ok') is False):
+        error = data.get('error') if isinstance(data, dict) else None
+        if isinstance(error, dict) and error.get('message'):
+            code = str(error.get('code') or 'api_error')
+            raise CliExecutionError(f"X request failed ({code}): {error['message']}")
+        if isinstance(error, str) and error.strip():
+            raise CliExecutionError(error)
+        if 'Failed to init ClientTransaction' in completed.stderr:
+            raise CliExecutionError(
+                'The Twitter CLI failed and its X transaction setup reported an error. '
+                'The warning alone does not confirm whether a post was published. '
+                'Check your X profile before trying again to avoid a duplicate post.'
+            )
+        raise CliExecutionError(
+            completed.stderr.strip() or completed.stdout.strip() or 'Twitter CLI command failed'
+        )
+    if not parsed:
+        raise InvalidCliOutputError(
+            'Twitter CLI returned invalid JSON. For posting commands, check your X profile '
+            'before trying again to avoid a duplicate post.'
+        )
+    return data
 
 
 def _run_json_command(command: list[str], timeout: int = 25) -> CliResult:
@@ -178,14 +218,7 @@ def _run_json_command(command: list[str], timeout: int = 25) -> CliResult:
     except FileNotFoundError as exc:
         raise CliNotFoundError("The twitter CLI was not found on PATH") from exc
 
-    if completed.returncode != 0:
-        message = completed.stderr.strip() or completed.stdout.strip() or "Twitter CLI command failed"
-        raise CliExecutionError(message)
-
-    try:
-        data = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise InvalidCliOutputError("Twitter CLI returned invalid JSON") from exc
+    data = _parse_cli_response(completed)
     return CliResult(command=command, data=data)
 
 
@@ -194,11 +227,8 @@ def run_growth_action(action: str, tweet_id: str, comment_text: str | None = Non
     return _run_json_command(command)
 
 
-def run_post_action(post_text: str, image_path: str | None = None) -> CliResult:
-    command = build_post_command(post_text)
-    if image_path:
-        command.extend(["--image", str(image_path)])
-    return _run_json_command(command, timeout=90 if image_path else 25)
+def run_post_action(post_text: str) -> CliResult:
+    return _run_json_command(build_post_command(post_text))
 
 
 def fetch_recent_liked_posts(limit: int = 20) -> list[dict[str, Any]]:

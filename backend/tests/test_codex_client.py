@@ -74,11 +74,30 @@ def test_cli_failures_are_clear_and_never_return_logs(monkeypatch, failure):
 @pytest.mark.parametrize('endpoint', ['/api/posts/ideas', '/api/growth/analyze'])
 def test_ai_endpoints_map_cli_errors_to_http(monkeypatch, tmp_path, error, status, endpoint):
     monkeypatch.setattr(main, 'get_growth_store', lambda: main.GrowthStore(tmp_path / 'growth.sqlite3'))
-    monkeypatch.setattr(main, 'fetch_trending_research', lambda: {'sources': [{'id':'1'}], 'since':'today', 'researched_at':'today', 'warning':None})
+    monkeypatch.setattr(main, 'fetch_trending_research', lambda **kwargs: {'sources': [{'id':'1'}], 'since':'today', 'researched_at':'today', 'warning':None})
     def fail(*args, **kwargs):
         raise error
+    monkeypatch.setattr(main, 'curate_research_for_essay', lambda sources, *a: sources)
     monkeypatch.setattr(main, 'generate_post_ideas', fail)
     monkeypatch.setattr(main, 'analyze_candidates', fail)
     response = TestClient(main.app).post(endpoint, json={'source_mode':'trends', 'candidates':[{'id':'123','text':'AI tools'}]})
     assert response.status_code == status
     assert response.json()['detail'] == str(error)
+
+
+def test_research_cli_enables_live_search_without_enabling_write_tools(monkeypatch):
+    captured = {}
+    class Process:
+        returncode = 0
+        def __init__(self, command, **kwargs):
+            captured["command"] = command
+            Path(command[command.index("--output-last-message") + 1]).write_text('{"sources":[]}')
+        def communicate(self, prompt, timeout):
+            captured["prompt"] = prompt.decode()
+    monkeypatch.setattr(subprocess, "Popen", Process)
+    client._run_codex("Research the essay", {}, client._object_schema({"sources": {"type": "array"}}), web_search=True)
+    assert 'web_search="live"' in captured["command"]
+    assert 'web_search="disabled"' not in captured["command"]
+    assert "shell_tool" in captured["command"]
+    assert "Research using live web search" in captured["prompt"]
+    assert "Do not call tools" not in captured["prompt"]

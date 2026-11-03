@@ -6,6 +6,12 @@ import subprocess
 from app.twitter_cli import CliResult
 
 
+def essay_draft(kwargs):
+    return {"post_text": "A solo operator can test this business activity.",
+            "essay_connection": "Tests the essay's claim about individual execution capacity.",
+            "source_ids": [kwargs["research_sources"][0]["id"]]}
+
+
 def test_bookmark_executes_cli_and_records_history(monkeypatch, tmp_path):
     from app import main
 
@@ -312,7 +318,7 @@ def test_post_ideas_returns_generated_ideas(monkeypatch, tmp_path):
 
     store = main.GrowthStore(tmp_path / "growth.sqlite3")
 
-    def fake_generate(profile_focus, themes, preference_memory=None, count=5, recent_liked_posts=None, recent_bookmarked_posts=None):
+    def fake_generate(profile_focus, themes, preference_memory=None, count=5, recent_liked_posts=None, recent_bookmarked_posts=None, **kwargs):
         assert "Jovis" in profile_focus
         assert "CRM" in themes
         assert preference_memory["summary"] == "No preference memory recorded yet."
@@ -327,6 +333,8 @@ def test_post_ideas_returns_generated_ideas(monkeypatch, tmp_path):
                 "rationale": "Relevant buyer pain.",
                 "cta": "See Jovis",
                 "post_text": "Your CRM already knows which deals are stuck.",
+                "essay_connection": "Tests whether a solo operator can automate customer analysis.",
+                "source_ids": [kwargs["research_sources"][0]["id"]],
             }
         ]
 
@@ -338,7 +346,7 @@ def test_post_ideas_returns_generated_ideas(monkeypatch, tmp_path):
 
     response = client.post(
         "/api/posts/ideas",
-        json={"profile_focus": "Jovis buyers", "themes": "CRM analytics", "count": 3},
+        json={"source_mode": "interests", "profile_focus": "Jovis buyers", "themes": "CRM analytics", "count": 3},
     )
 
     assert response.status_code == 200
@@ -443,13 +451,13 @@ def test_post_ideas_uses_local_likes_when_x_is_unavailable(monkeypatch, tmp_path
         assert kwargs["recent_liked_posts"][0]["id"] == "123"
         assert kwargs["recent_liked_posts"][0]["timestamp_basis"] == "action_time"
         assert kwargs["recent_bookmarked_posts"][0]["id"] == "789"
-        return []
+        return [essay_draft(kwargs)]
 
     monkeypatch.setattr(main, "get_growth_store", lambda: store)
     monkeypatch.setattr(main, "fetch_recent_liked_posts", fail_fetch)
     monkeypatch.setattr(main, "fetch_recent_bookmarked_posts", fail_fetch)
     monkeypatch.setattr(main, "generate_post_ideas", fake_generate)
-    response = TestClient(main.app).post("/api/posts/ideas", json={})
+    response = TestClient(main.app).post("/api/posts/ideas", json={"source_mode": "interests"})
     assert response.status_code == 200
     assert response.json()["liked_posts_used"] == 1
     assert response.json()["likes_warning"]
@@ -460,21 +468,21 @@ def test_post_ideas_handles_empty_and_duplicate_likes(monkeypatch, tmp_path):
 
     store = main.GrowthStore(tmp_path / "growth.sqlite3")
     monkeypatch.setattr(main, "get_growth_store", lambda: store)
-    monkeypatch.setattr(main, "generate_post_ideas", lambda *args, **kwargs: [])
+    monkeypatch.setattr(main, "generate_post_ideas", lambda *args, **kwargs: [essay_draft(kwargs)])
     monkeypatch.setattr(main, "fetch_recent_liked_posts", lambda **kwargs: [])
     monkeypatch.setattr(main, "fetch_recent_bookmarked_posts", lambda **kwargs: [])
     client = TestClient(main.app)
-    assert client.post("/api/posts/ideas", json={}).status_code == 422
+    assert client.post("/api/posts/ideas", json={"source_mode": "interests"}).status_code == 422
     monkeypatch.setattr(main, "fetch_recent_liked_posts", lambda **kwargs: [{"id": "123", "text": "Useful", "createdAtISO": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()}] * 2)
-    body = client.post("/api/posts/ideas", json={}).json()
+    body = client.post("/api/posts/ideas", json={"source_mode": "interests"}).json()
     assert body["liked_posts_used"] == 1
     assert "posts published" in body["context_warning"]
 
 
-def test_post_ideas_defaults_to_interests_and_counts_overlapping_sources_once(monkeypatch, tmp_path):
+def test_post_ideas_explicit_interests_counts_overlapping_sources_once(monkeypatch, tmp_path):
     from app import main
 
-    source = {"id": "same", "text": "A post about gardening", "createdAtISO": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()}
+    source = {"id": "same", "text": "Automating work in a one-person workshop", "createdAtISO": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()}
     monkeypatch.setattr(main, "get_growth_store", lambda: main.GrowthStore(tmp_path / "growth.sqlite3"))
     monkeypatch.setattr(main, "fetch_recent_liked_posts", lambda **kwargs: [source])
     monkeypatch.setattr(main, "fetch_recent_bookmarked_posts", lambda **kwargs: [source])
@@ -484,10 +492,10 @@ def test_post_ideas_defaults_to_interests_and_counts_overlapping_sources_once(mo
         assert themes == ""
         assert kwargs["recent_liked_posts"][0]["id"] == "same"
         assert kwargs["recent_bookmarked_posts"][0]["id"] == "same"
-        return [{"title": "Gardening", "post_text": "An original thought about gardening."}]
+        return [essay_draft(kwargs)]
 
     monkeypatch.setattr(main, "generate_post_ideas", generate)
-    response = TestClient(main.app).post("/api/posts/ideas", json={})
+    response = TestClient(main.app).post("/api/posts/ideas", json={"source_mode": "interests"})
     assert response.status_code == 200
     assert response.json()["liked_posts_used"] == 1
     assert response.json()["bookmarked_posts_used"] == 1
@@ -505,5 +513,42 @@ def test_post_ideas_does_not_generate_without_recent_context(monkeypatch, tmp_pa
         pytest.fail("Generation should not run without interest context")
 
     monkeypatch.setattr(main, "generate_post_ideas", unexpected)
-    response = TestClient(main.app).post("/api/posts/ideas", json={"themes": "Generic AI content"})
+    response = TestClient(main.app).post("/api/posts/ideas", json={"source_mode": "interests", "themes": "Generic AI content"})
     assert response.status_code == 422
+
+
+def test_image_generation_routes_are_removed():
+    from app import main
+    client = TestClient(main.app)
+    assert client.post('/api/posts/images', json={'post_text': 'Draft'}).status_code == 404
+    assert client.get('/api/posts/images/' + 'a' * 32).status_code == 404
+    assert client.get('/api/posts/images/' + 'a' * 32 + '/file').status_code == 404
+
+
+def test_legacy_image_request_does_not_silently_publish_text(monkeypatch):
+    from app import main
+    def unexpected(*args, **kwargs):
+        raise AssertionError('An obsolete attachment request must not publish a post')
+    monkeypatch.setattr(main, 'run_post_action', unexpected)
+    response = TestClient(main.app).post('/api/posts/approve', json={
+        'post_text': 'Draft from an older browser tab', 'image_id': 'a' * 32,
+    })
+    assert response.status_code == 422
+    assert 'no longer supported' in response.json()['detail']
+
+
+def test_text_post_with_cookie_progress_records_success_once(monkeypatch, tmp_path):
+    from app import main
+    store = main.GrowthStore(tmp_path / 'growth.sqlite3')
+    monkeypatch.setattr(main, 'get_growth_store', lambda: store)
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        assert command == ['twitter', 'post', 'Approved post', '--json']
+        return subprocess.CompletedProcess(command, 0,
+            'Getting Twitter cookies...\n' + json.dumps({'ok': True, 'data': {'id': '123', 'success': True}}), '')
+    monkeypatch.setattr(subprocess, 'run', run)
+    response = TestClient(main.app).post('/api/posts/approve', json={'post_text': 'Approved post'})
+    assert response.status_code == 200
+    assert response.json()['record']['tweet_id'] == '123'
+    assert len(calls) == len(store.history()) == 1

@@ -8,22 +8,19 @@ import {
   Sparkles,
   X,
 } from "@lucide/vue";
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { formatDate } from "../lib/workbench";
-import PostIdeaImage from "./PostIdeaImage.vue";
 
-const draftStorageKey = "twitter-workbench-post-ideas-v1";
+const draftStorageKey = "twitter-workbench-post-ideas-essay-v1";
 let saved = {};
 try {
   const value = JSON.parse(localStorage.getItem(draftStorageKey) || "{}");
   if (value && Array.isArray(value.ideas)) saved = value;
 } catch { /* Drafts still work when browser storage is unavailable. */ }
-const profileFocus = ref(saved.profileFocus ?? "Technology and AI");
-const sourceMode = ref(saved.sourceMode ?? "trends");
-const themes = ref(saved.themes ?? "");
-const count = ref(saved.count ?? 5);
-const generateImages = ref(saved.generateImages ?? false);
-const ideas = ref(saved.ideas ?? []);
+const direction = ref(null);
+const ideaType = ref(["mix", "project", "thought_leadership"].includes(saved.ideaType) ? saved.ideaType : "mix");
+const count = ref(Math.max(1, Math.min(8, Number(saved.count) || 5)));
+const ideas = ref((saved.ideas ?? []).map(({ image, includeImage, ...idea }) => idea));
 const loading = ref(false);
 const actionLoadingIndex = ref(null);
 const error = ref("");
@@ -34,16 +31,29 @@ const contextWarning = ref(saved.contextWarning ?? "");
 const researchSources = ref(saved.researchSources ?? []);
 const researchedAt = ref(saved.researchedAt ?? null);
 const generatedMode = ref(saved.generatedMode ?? null);
+const essayVersion = ref(saved.essayVersion ?? null);
 
-watch([ideas, approved, profileFocus, sourceMode, themes, count, generateImages,
-  likedPostsUsed, bookmarkedPostsUsed, contextWarning, researchSources, researchedAt, generatedMode], () => {
+onMounted(async () => {
+  try {
+    const response = await fetch('/api/posts/editorial-direction');
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.detail || 'Could not load essay.md');
+    direction.value = body.direction;
+    if (ideas.value.length && essayVersion.value !== body.direction.version) {
+      error.value = 'Your essay has changed. Generate fresh drafts to use the current version.';
+    }
+  } catch (failure) { error.value = failure.message; }
+});
+
+watch([ideas, approved, count,
+  likedPostsUsed, bookmarkedPostsUsed, contextWarning, researchSources, researchedAt, generatedMode, ideaType, essayVersion], () => {
   try {
     localStorage.setItem(draftStorageKey, JSON.stringify({
-      ideas: ideas.value, approved: approved.value, profileFocus: profileFocus.value,
-      sourceMode: sourceMode.value, themes: themes.value, count: count.value,
-      generateImages: generateImages.value, likedPostsUsed: likedPostsUsed.value,
+      ideas: ideas.value, approved: approved.value, count: count.value,
+      likedPostsUsed: likedPostsUsed.value,
       bookmarkedPostsUsed: bookmarkedPostsUsed.value, contextWarning: contextWarning.value,
       researchSources: researchSources.value, researchedAt: researchedAt.value, generatedMode: generatedMode.value,
+      ideaType: ideaType.value, essayVersion: essayVersion.value,
     }));
   } catch { /* Storage limits must not prevent editing or posting. */ }
 }, { deep: true });
@@ -83,18 +93,19 @@ async function generateIdeas() {
   generatedMode.value = null;
   try {
     const body = await requestJson("/api/posts/ideas", {
-      source_mode: sourceMode.value,
-      profile_focus: profileFocus.value,
-      themes: themes.value,
+      source_mode: "trends",
       count: count.value,
+      idea_type: ideaType.value,
     });
-    ideas.value = (body.ideas ?? []).map((idea) => ({ ...idea, includeImage: generateImages.value, image: null }));
+    ideas.value = body.ideas ?? [];
     likedPostsUsed.value = body.liked_posts_used ?? 0;
     bookmarkedPostsUsed.value = body.bookmarked_posts_used ?? 0;
     contextWarning.value = body.context_warning ?? body.likes_warning ?? "";
     researchSources.value = body.research_sources ?? [];
     researchedAt.value = body.researched_at ?? null;
-    generatedMode.value = body.source_mode ?? sourceMode.value;
+    generatedMode.value = body.source_mode ?? "trends";
+    essayVersion.value = body.editorial_direction?.version ?? null;
+    direction.value = { ...direction.value, ...body.editorial_direction };
   } catch (failure) {
     error.value = failure.message;
   } finally {
@@ -109,7 +120,6 @@ async function approveIdea(idea, index) {
   try {
     await requestJson("/api/posts/approve", {
       post_text: idea.post_text,
-      image_id: idea.includeImage ? idea.image?.id : null,
       metadata: {
         post_idea: {
           title: idea.title ?? "",
@@ -119,6 +129,9 @@ async function approveIdea(idea, index) {
           cta: idea.cta ?? "",
           source_ids: idea.source_ids ?? [],
           sources: idea.sources ?? [],
+          essay_connection: idea.essay_connection ?? "",
+          essay_version: idea.essay_version ?? "",
+          idea_type: idea.idea_type ?? "insight",
         },
       },
     });
@@ -147,63 +160,43 @@ function rejectIdea(index) {
         <FileText :size="14" aria-hidden="true" />
         Post Ideas
       </div>
+      <div v-if="direction" class="mb-5 border-b border-rule pb-4">
+        <p class="text-xs uppercase tracking-[0.08em] text-muted">Editorial foundation</p>
+        <h2 class="mt-2 text-base font-bold leading-6">{{ direction.title }}</h2>
+        <p class="mt-2 text-xs leading-5 text-muted">One focus, explored deeply. Every draft builds on your essay.</p>
+        <a href="/api/posts/essay" target="_blank" rel="noreferrer" class="inline-flex min-h-9 items-center text-sm underline underline-offset-4">Read essay.md</a>
+      </div>
       <div class="settings-fields grid gap-4">
+        <p class="text-xs leading-5 text-muted">Searches the web for recent news, Hacker News discussions, viral posts, projects and research papers through the lens of your essay.</p>
         <label class="grid gap-1.5 text-sm">
-          <span class="font-medium">Research from</span>
-          <select v-model="sourceMode" :disabled="loading" class="min-h-11 border border-rule-strong bg-paper px-3">
-            <option value="trends">Trending AI &amp; technology</option>
-            <option value="interests">My likes &amp; bookmarks</option>
+          <span class="font-medium">Post type</span>
+          <select v-model="ideaType" :disabled="loading" class="min-h-11 border border-rule-strong bg-paper px-3">
+            <option value="mix">Both post types</option>
+            <option value="project">Latest projects</option>
+            <option value="thought_leadership">Thought leadership</option>
           </select>
-        </label>
-        <label class="grid gap-1.5 text-sm">
-          <span class="font-medium">Profile focus (optional)</span>
-          <textarea
-            v-model="profileFocus"
-            :disabled="loading"
-            placeholder="AI builders, developer tools, software and emerging technology"
-            class="min-h-28 rounded-sm border border-rule-strong bg-paper px-3 py-2 leading-5"
-          ></textarea>
-        </label>
-        <label class="grid gap-1.5 text-sm">
-          <span class="font-medium">Themes (optional)</span>
-          <textarea
-            v-model="themes"
-            :disabled="loading"
-            placeholder="Any topics to emphasize, such as agents or coding tools"
-            class="min-h-24 rounded-sm border border-rule-strong bg-paper px-3 py-2 leading-5"
-          ></textarea>
         </label>
         <label class="grid gap-1.5 text-sm">
           <span class="font-medium">Ideas</span>
           <input
             v-model.number="count"
             :disabled="loading"
-            class="h-9 rounded-sm border border-rule-strong bg-paper px-3"
+            class="min-h-11 rounded-sm border border-rule-strong bg-paper px-3"
             max="8"
             min="1"
             type="number"
           />
         </label>
         <button
-          class="inline-flex h-9 items-center justify-center gap-2 rounded-sm bg-ink px-4 text-sm font-semibold text-paper hover:bg-ink-hover disabled:cursor-not-allowed disabled:opacity-55"
-          :disabled="loading || actionLoadingIndex !== null"
+          class="inline-flex min-h-11 items-center justify-center gap-2 rounded-sm bg-ink px-4 text-sm font-semibold text-paper hover:bg-ink-hover disabled:cursor-not-allowed disabled:opacity-55"
+          :disabled="loading || actionLoadingIndex !== null || !direction"
           type="button"
           @click="generateIdeas"
         >
           <Sparkles :class="{ 'animate-spin': loading }" :size="16" aria-hidden="true" />
-          {{ loading ? (sourceMode === 'trends' ? "Researching & drafting" : "Generating ideas") : (sourceMode === 'trends' ? "Research & draft" : "Generate ideas") }}
+          {{ loading ? "Researching & drafting" : "Research & draft" }}
         </button>
-        <label class="flex min-h-11 items-center gap-2 text-sm">
-          <input v-model="generateImages" type="checkbox" :disabled="loading" class="accent-ink" />
-          Generate images with drafts
-        </label>
-        <p class="text-xs leading-5 text-muted">Images use your signed-in Codex CLI and appear as they finish.</p>
-        <p v-if="sourceMode === 'trends'" class="text-xs leading-5 text-muted">
-          Researches the past seven days across Hacker News, GitHub and AI publisher feeds. Uses available engagement signals and fresh announcements, with sources attached to each draft.
-        </p>
-        <p v-else class="text-xs leading-5 text-muted">
-          Uses your likes and bookmarks with a 48-hour activity window. Add a focus or themes to steer the angle.
-        </p>
+
       </div>
 
       <div class="mt-6 rounded-sm border border-warning-rule bg-warning-wash p-3 text-sm text-warning">
@@ -233,7 +226,7 @@ function rejectIdea(index) {
           <span class="rounded-sm bg-paper-shade px-2 py-1">{{ approved.length }} approved</span>
           <span v-if="generatedMode === 'interests' && likedPostsUsed !== null" class="rounded-sm bg-paper-shade px-2 py-1">{{ likedPostsUsed }} likes used</span>
           <span v-if="generatedMode === 'interests' && bookmarkedPostsUsed !== null" class="rounded-sm bg-paper-shade px-2 py-1">{{ bookmarkedPostsUsed }} bookmarks used</span>
-          <span v-if="researchSources.length" class="rounded-sm bg-paper-shade px-2 py-1">{{ researchSources.length }} research sources · past 7 days</span>
+          <span v-if="researchSources.length" class="rounded-sm bg-paper-shade px-2 py-1">{{ researchSources.length }} essay-related research sources</span>
         </div>
         <p v-if="researchedAt" class="text-xs text-muted">Researched {{ formatDate(researchedAt) }}. Engagement counts are snapshots; publisher updates have no popularity measurement.</p>
         <details v-if="researchSources.length" class="border-b border-rule pb-3 text-sm">
@@ -242,6 +235,7 @@ function rejectIdea(index) {
             <li v-for="source in researchSources" :key="source.id" class="min-w-0">
               <a :href="source.url" target="_blank" rel="noreferrer" class="break-words font-bold underline underline-offset-4">{{ source.title }}</a>
               <p class="mt-1 text-xs leading-5 text-muted">{{ source.source }} · {{ source.date_basis }} {{ formatDate(source.published_at) }} · {{ source.traction }}</p>
+              <p v-if="source.essay_connection" class="mt-1 text-xs leading-5">{{ source.evidence_type }}: {{ source.essay_connection }}</p>
             </li>
           </ul>
         </details>
@@ -265,6 +259,7 @@ function rejectIdea(index) {
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div class="min-w-0">
                 <h2 class="text-base font-semibold">{{ idea.title || "Post idea" }}</h2>
+                <span v-if="idea.idea_type" class="mt-1 inline-block text-xs uppercase tracking-[0.08em] text-muted">{{ idea.idea_type === 'thought_leadership' ? 'Thought leadership' : idea.idea_type === 'project' ? 'Project' : idea.idea_type }}</span>
                 <p class="mt-1 text-sm leading-5 text-muted">{{ idea.angle }}</p>
               </div>
               <span
@@ -277,6 +272,7 @@ function rejectIdea(index) {
             </div>
 
             <div class="mt-3 grid gap-2 text-sm">
+              <p v-if="idea.essay_connection" class="leading-6"><span class="font-bold">Connection to your essay:</span> {{ idea.essay_connection }}</p>
               <div v-if="idea.audience" class="text-muted">
                 <span class="font-medium text-ink-secondary">Audience:</span>
                 {{ idea.audience }}
@@ -310,12 +306,6 @@ function rejectIdea(index) {
               {{ postLength(idea.post_text) }}/280 characters
             </div>
 
-            <label class="mt-3 flex min-h-11 items-center gap-2 text-sm">
-              <input v-model="idea.includeImage" type="checkbox" :disabled="approved.includes(index) || actionLoadingIndex !== null" class="accent-ink" />
-              Include image
-            </label>
-            <PostIdeaImage v-model="idea.image" :enabled="idea.includeImage" :post-text="idea.post_text" :title="idea.title" :locked="approved.includes(index) || actionLoadingIndex !== null" />
-
             <div v-if="idea.cta" class="mt-3 rounded-sm bg-paper-shade px-3 py-2 text-sm text-ink-secondary">
               CTA: {{ idea.cta }}
             </div>
@@ -323,12 +313,12 @@ function rejectIdea(index) {
             <div class="mt-4 flex flex-wrap gap-2">
               <button
                 class="inline-flex h-9 items-center gap-2 rounded-sm bg-ink px-3 text-sm font-semibold text-paper hover:bg-ink-hover disabled:cursor-not-allowed disabled:opacity-55"
-                :disabled="actionLoadingIndex !== null || approved.includes(index) || !idea.post_text?.trim() || postLength(idea.post_text) > 280 || (idea.includeImage && idea.image?.status !== 'ready')"
+                :disabled="actionLoadingIndex !== null || approved.includes(index) || !idea.post_text?.trim() || postLength(idea.post_text) > 280 || idea.essay_version !== direction?.version"
                 type="button"
                 @click="approveIdea(idea, index)"
               >
                 <Send :size="16" aria-hidden="true" />
-                {{ actionLoadingIndex === index ? "Posting" : (idea.includeImage ? "Approve and post text + image" : "Approve and post text") }}
+                {{ actionLoadingIndex === index ? "Posting" : "Approve and post" }}
               </button>
               <button
                 class="inline-flex h-9 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-semibold hover:bg-paper-shade disabled:cursor-not-allowed disabled:opacity-55"
@@ -345,11 +335,8 @@ function rejectIdea(index) {
 
         <div v-else class="manuscript-empty">
           <div class="max-w-sm">
-            <div class="font-semibold">{{ sourceMode === 'trends' ? 'Research AI and technology trends' : 'Generate post ideas' }}</div>
-            <p v-if="sourceMode === 'trends'" class="mt-1 text-sm leading-6 text-muted">Find recent stories with measurable interest, then create original posts with links to the research behind them.</p>
-            <p v-else class="mt-1 text-sm leading-6 text-muted">
-              Turn what you have liked and saved into original drafts. Your recent interests guide the topics; focus and themes are optional.
-            </p>
+            <div class="font-semibold">Build around one idea</div>
+            <p class="mt-1 text-sm leading-6 text-muted">Discover current projects and develop informed points of view on software factories, automation and independent work, grounded in essay.md.</p>
           </div>
         </div>
       </div>

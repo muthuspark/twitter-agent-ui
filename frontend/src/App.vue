@@ -18,6 +18,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import AnalyticsDashboard from "./components/AnalyticsDashboard.vue";
 import PostIdeas from "./components/PostIdeas.vue";
 import Feeds from "./components/Feeds.vue";
+import PotentialCustomers from "./components/PotentialCustomers.vue";
 import { loadBlockedTerms } from "./lib/blocklist";
 import {
   buildCommandPreview,
@@ -314,6 +315,15 @@ onMounted(async () => {
               Analytics
             </button>
             <button
+              class="manuscript-tab"
+              :class="{ 'is-active': activeTab === 'customers' }"
+              :aria-current="activeTab === 'customers' ? 'page' : undefined"
+              type="button"
+              @click="activeTab = 'customers'"
+            >
+              Potential Customers
+            </button>
+            <button
               id="feed-block-list-toggle"
               class="manuscript-tab feed-block-nav-button"
               :class="{ 'font-bold text-ink': activeTab === 'feeds' && feedBlockListOpen }"
@@ -333,7 +343,7 @@ onMounted(async () => {
             Local CLI
           </span>
           <button
-            v-if="activeTab !== 'feeds'"
+            v-if="activeTab === 'workbench'"
             class="inline-flex h-8 items-center gap-2 rounded-sm border border-rule-strong bg-paper px-3 text-sm font-medium hover:bg-paper-shade disabled:cursor-not-allowed disabled:opacity-55"
             :disabled="loading || bootLoading"
             type="button"
@@ -577,6 +587,9 @@ onMounted(async () => {
       </main>
       <PostIdeas v-else-if="activeTab === 'postIdeas'" />
       <AnalyticsDashboard v-else-if="activeTab === 'analytics'" />
+      <KeepAlive>
+        <PotentialCustomers v-if="activeTab === 'customers'" />
+      </KeepAlive>
       <KeepAlive>
         <Feeds v-if="activeTab === 'feeds'" ref="feedsRef" :block-list-open="feedBlockListOpen" @block-list-count="blockedTermCount = $event" />
       </KeepAlive>

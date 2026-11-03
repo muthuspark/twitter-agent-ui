@@ -145,3 +145,42 @@ def test_maps_invalid_json_to_output_error(monkeypatch):
 
     with pytest.raises(InvalidCliOutputError):
         run_twitter_command("feed", {"max": 3})
+
+
+TRANSACTION_WARNING = "WARNING twitter_cli.client: Failed to init ClientTransaction: 'NoneType' object has no attribute 'group'"
+
+
+def test_post_accepts_cookie_progress_before_success_json_without_retry(monkeypatch):
+    from app.twitter_cli import run_post_action
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0,
+            '\nGetting Twitter cookies...\n' + json.dumps({'ok': True, 'data': {'success': True, 'id': '123'}}),
+            TRANSACTION_WARNING)
+    monkeypatch.setattr(subprocess, 'run', run)
+    result = run_post_action('Approved post')
+    assert result.data['data']['id'] == '123'
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('exit_code', [0, 1])
+def test_actual_api_error_is_shown_instead_of_transaction_warning(monkeypatch, exit_code):
+    from app.twitter_cli import run_post_action
+    def run(command, **kwargs):
+        return subprocess.CompletedProcess(command, exit_code,
+            'Getting Twitter cookies...\n' + json.dumps({'ok': False, 'error': {
+                'code': 'forbidden', 'message': 'Post failed (HTTP 403): permission denied'}}),
+            TRANSACTION_WARNING)
+    monkeypatch.setattr(subprocess, 'run', run)
+    with pytest.raises(CliExecutionError, match=r'forbidden.*Post failed \(HTTP 403\)') as error:
+        run_post_action('Approved post')
+    assert 'NoneType' not in str(error.value)
+
+
+def test_log_braces_and_trailing_garbage_do_not_become_a_success(monkeypatch):
+    from app.twitter_cli import run_post_action
+    monkeypatch.setattr(subprocess, 'run', lambda command, **kw:
+        subprocess.CompletedProcess(command, 0, 'log {"ok":true}\nnot JSON', ''))
+    with pytest.raises(InvalidCliOutputError, match='check your X profile'):
+        run_post_action('Approved post')
