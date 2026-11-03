@@ -5,7 +5,6 @@ import {
   Bookmark,
   ExternalLink,
   Heart,
-  MessageSquare,
   RefreshCw,
   Repeat2,
   X,
@@ -553,7 +552,6 @@ onBeforeUnmount(stop);
               {{ tweet.retweetedBy }} reposted
             </p>
             <header class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span class="post-author-mark" aria-hidden="true">{{ (tweet.author?.name || tweet.author?.screenName || '?').slice(0, 2) }}</span>
               <a
                 data-thread-toggle
                 :href="tweetUrl(tweet)"
@@ -695,17 +693,6 @@ onBeforeUnmount(stop);
                 <ExternalLink :size="18" aria-hidden="true" />
               </a>
             </div>
-              <button
-                type="button"
-                class="button button-quiet button-icon button-icon-compact feed-open-thread"
-                aria-label="View thread"
-                title="View thread"
-                :aria-expanded="String(selectedPost?.id) === String(tweet.id)"
-                aria-controls="feed-thread"
-                @click.stop="openThread(tweet)"
-              >
-                <MessageSquare :size="16" aria-hidden="true" />
-              </button>
             </footer>
               <button
                 v-if="selectedText?.postId === String(tweet.id)"

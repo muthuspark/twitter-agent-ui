@@ -111,13 +111,12 @@ textarea::placeholder {
 }
 .manuscript-app {
   min-height: 100vh;
-  padding: 2.5rem 2rem;
+  padding: 0;
 }
 .manuscript-shell {
   position: relative;
   max-width: var(--page-max-width);
   min-height: calc(100dvh - 5rem);
-  margin-inline: auto;
   border: 1px solid var(--rule);
 }
 .manuscript-shell::before,
@@ -134,36 +133,6 @@ textarea::placeholder {
 .manuscript-shell > main:not(.feeds-view) {
   padding-inline: 1.5rem;
 }
-.app-identity {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding-block: 0.75rem;
-}
-.app-mark,
-.post-author-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  background: var(--ink);
-  color: var(--paper);
-  font-size: 10px;
-  font-weight: 600;
-}
-.app-mark { width: 32px; height: 32px; border-radius: 8px; }
-.app-identity h1 { font-size: 1rem; font-weight: 600; }
-.app-identity p { margin-top: 2px; color: var(--muted); font-size: 0.75rem; }
-.app-identity p::before {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: var(--ink);
-}
-.post-author-mark { width: 24px; height: 24px; border-radius: 7px; }
 
 .manuscript-shell > main {
   width: 100%;
@@ -462,12 +431,8 @@ summary:focus-visible {
 .feeds-view {
   min-height: calc(100dvh - 10rem);
 }
-.feed-timeline-column {
-  padding: 0.5rem 1rem 2rem;
-}
 .feed-timeline-column > section[aria-label="Home timeline"] {
-  max-width: 60rem;
-  margin-inline: auto;
+  width: 100%;
 }
 .feed-skeleton {
   display: grid;
@@ -499,24 +464,25 @@ summary:focus-visible {
 }
 .feed-post {
   position: relative;
-  padding: 1rem 0.75rem 1rem 2.75rem;
-  margin-block: 0.5rem;
-  border-radius: 6px;
+  padding: 1rem 0.75rem;
+  margin-block: 0rem;
+  border-radius: 0px;
   overflow-wrap: anywhere;
+}
+.feed-post + .feed-post::before {
+  content: "";
+  position: absolute;
+  top: -0.25rem;
+  inset-inline: var(--post-divider-inset, 0);
+  border-top: 1px solid var(--rule);
+  pointer-events: none;
 }
 .feed-post > p { max-width: 75ch; }
 .feed-post > header { min-height: 24px; font-size: 0.8125rem; }
-.feed-post > header .post-author-mark {
-  position: absolute;
-  left: 0.5rem;
-  top: 1rem;
-}
 .feed-post > [data-feed-text] { margin-top: 0.375rem; font-size: 0.9375rem; line-height: 1.75; }
 .feed-post > header time,
-.feed-post > header span:not(.post-author-mark) { font-size: 0.75rem; }
+.feed-post > header span { font-size: 0.75rem; }
 .feed-post blockquote { background: var(--paper-shade); border-radius: 8px; }
-.feed-open-thread { margin-left: auto; }
-.feed-open-thread[aria-expanded="true"] { background: var(--rule); }
 .feed-post-footer { font-size: 0.75rem; }
 
 .feed-media {
@@ -578,6 +544,7 @@ summary:focus-visible {
   min-width: 0;
 }
 .feed-clickable-post {
+  padding: 1.5rem 1.75rem;
   cursor: pointer;
 }
 .feed-clickable-post [data-feed-text] {
@@ -618,6 +585,7 @@ summary:focus-visible {
   gap: 0;
 }
 .feed-thread {
+  --post-divider-inset: -0.875rem;
   position: sticky;
   top: 1rem;
   min-width: 0;
@@ -640,14 +608,7 @@ summary:focus-visible {
 }
 .thread-heading h2 { font-size: 1rem; font-weight: 600; }
 .thread-post { padding-block: 0.75rem; }
-.thread-post > header .post-author-mark { top: 0.75rem; }
 .thread-post > header strong { font-size: 0.8125rem; }
-.thread-post.is-thread-source {
-  background: var(--paper-shade);
-  border-radius: 8px;
-  color: var(--muted);
-}
-.thread-post.is-thread-source [data-feed-text] { font-size: 0.8125rem; }
 .thread-post .feed-media img {
   max-height: 24rem;
 }
@@ -699,9 +660,6 @@ summary:focus-visible {
 }
 
 @media (max-width: 639px) {
-  .manuscript-app {
-    padding: 1rem 0.75rem;
-  }
   .manuscript-nav {
     flex-wrap: wrap;
     gap: 0.25rem;
@@ -720,11 +678,8 @@ summary:focus-visible {
 }
 @media (max-width: 639px) {
   .manuscript-header { padding-inline: 0.75rem; }
-  .feed-nav-actions { position: absolute; top: 0.5rem; right: 0.5rem; }
-  .app-identity { padding-right: 8rem; }
-  .app-identity p { display: none; }
-  .feed-timeline-column { padding-inline: 0.5rem; }
-  .feed-post { padding-left: 2.5rem; padding-right: 0.5rem; }
+  .feed-post { padding-inline: 0.5rem; }
+  .feed-clickable-post { padding-inline: 1rem; }
   .feed-post-metrics { flex-wrap: wrap; gap: 0.75rem; }
   .manuscript-shell > main:not(.feeds-view) { padding-inline: 1rem; }
 }

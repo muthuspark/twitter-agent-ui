@@ -44,7 +44,6 @@ const conversation = computed(() =>
       !blockMatcher.value(tweet),
   ),
 );
-const displayedPosts = computed(() => [props.post, ...conversation.value]);
 
 async function loadMore() {
   if (loading.value || !hasMore.value) return;
@@ -168,20 +167,12 @@ onBeforeUnmount(deactivate);
 
     <section aria-label="Post conversation" :aria-busy="loading">
       <article
-        v-for="tweet in displayedPosts"
+        v-for="tweet in conversation"
         :key="tweet.id"
         class="feed-post thread-post"
-        :class="{ 'is-thread-source': String(tweet.id) === String(post.id) }"
         :data-post-id="tweet.id"
       >
-        <p
-          v-if="String(tweet.id) === String(post.id)"
-          class="mb-3 text-xs uppercase tracking-[0.1em] text-muted"
-        >
-          Selected post
-        </p>
         <header class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span class="post-author-mark" aria-hidden="true">{{ (tweet.author?.name || tweet.author?.screenName || '?').slice(0, 2) }}</span>
           <strong class="text-base">{{
             tweet.author?.name || tweet.author?.screenName || "Unknown author"
           }}</strong>
