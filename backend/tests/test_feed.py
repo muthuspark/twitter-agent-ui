@@ -40,6 +40,24 @@ def test_bridge_rejects_changed_upstream_shape():
         fetch_page(client, None, 20, parse_timeline=None, serialize=None, features={})
 
 
+def test_bridge_preserves_author_media_descriptions():
+    url = "https://pbs.twimg.com/media/example.jpg"
+    payload = {"data": {"home": {"home_timeline_urt": {"instructions": [
+        {"media": [{"media_url_https": url, "ext_alt_text": "  A revenue chart  "},
+                   {"media_url_https": "other", "ext_alt_text": None}]}
+    ]}}}}
+    client = SimpleNamespace(_graphql_get=lambda *args: payload)
+    page = fetch_page(
+        client, None, 20,
+        parse_timeline=lambda *args: ([SimpleNamespace(id="1")], None),
+        serialize=lambda tweet: {"id": tweet.id, "media": [{"url": url}, {"url": "other"}]},
+        features={},
+    )
+    assert page["tweets"][0]["media"] == [
+        {"url": url, "altText": "A revenue chart"}, {"url": "other"}
+    ]
+
+
 @pytest.mark.parametrize("shape", ["tweetResult", "threaded_conversation_with_injections_v2"])
 def test_thread_bridge_requests_conversation_and_preserves_pagination(shape):
     captured = {}

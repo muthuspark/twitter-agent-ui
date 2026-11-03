@@ -1,72 +1,15 @@
 import { describe, expect, test } from "vitest";
-
+import { formatMetric } from "./format";
 import {
-  buildCommandPreview,
-  buildGrowthActionPayload,
-  buildTweetActionPayload,
-  combinedGrowthButtonState,
-  buildRecommendationMetadata,
-  formatMetric,
-  getTweetsUnderLikeThreshold,
-  loadWorkbenchCache,
-  saveWorkbenchCache,
-  growthActionLabel,
-  normalizeRecommendations,
-  normalizeResult,
-  tweetUrl,
-} from "./workbench";
-
-describe("buildCommandPreview", () => {
-  test("renders quoted search queries and max options", () => {
-    const preset = {
-      id: "search",
-      fields: [
-        { name: "query", type: "text" },
-        { name: "max", type: "number", default: 20 },
-      ],
-    };
-
-    expect(buildCommandPreview(preset, { query: "ai agents", max: 12 })).toBe(
-      'twitter search "ai agents" --max 12 --json',
-    );
-  });
-});
+  buildGrowthActionPayload, buildTweetActionPayload, combinedGrowthButtonState,
+  buildRecommendationMetadata, growthActionLabel, normalizeRecommendations, tweetUrl,
+} from "./social";
 
 describe("formatMetric", () => {
   test("formats compact values for large counts", () => {
     expect(formatMetric(999)).toBe("999");
     expect(formatMetric(1200)).toBe("1.2K");
     expect(formatMetric(4800000)).toBe("4.8M");
-  });
-});
-
-describe("normalizeResult", () => {
-  test("extracts tweet arrays from cli response envelope", () => {
-    const result = normalizeResult({
-      ok: true,
-      data: {
-        ok: true,
-        data: [
-          {
-            id: "1",
-            text: "hello",
-            author: { name: "Ada", screenName: "ada" },
-            metrics: { likes: 4 },
-          },
-        ],
-      },
-    });
-
-    expect(result.kind).toBe("tweets");
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0].author.screenName).toBe("ada");
-  });
-
-  test("keeps non-array payloads as json", () => {
-    const result = normalizeResult({ ok: true, data: { authenticated: true } });
-
-    expect(result.kind).toBe("json");
-    expect(result.value).toEqual({ authenticated: true });
   });
 });
 
@@ -212,7 +155,7 @@ describe("buildGrowthActionPayload", () => {
 });
 
 describe("buildTweetActionPayload", () => {
-  test("builds a direct like payload from a plain workbench tweet", () => {
+  test("builds a direct like payload from a plain feed tweet", () => {
     const payload = buildTweetActionPayload({
       id: "feed-123",
       text: "Shipping local agents",
@@ -238,59 +181,6 @@ describe("buildTweetActionPayload", () => {
         comment_drafts: [],
       },
     });
-  });
-});
-
-describe("getTweetsUnderLikeThreshold", () => {
-  test("returns loaded tweets with likes under the threshold that have not already been liked", () => {
-    const tweets = [
-      { id: "under", metrics: { likes: 19 } },
-      { id: "at-limit", metrics: { likes: 20 } },
-      { id: "liked", metrics: { likes: 3 } },
-      { id: "", metrics: { likes: 2 } },
-      { id: "unknown-likes", metrics: {} },
-    ];
-
-    expect(getTweetsUnderLikeThreshold(tweets, new Set(["liked"]), 20)).toEqual([
-      { id: "under", metrics: { likes: 19 } },
-    ]);
-  });
-});
-
-describe("workbench cache", () => {
-  test("round-trips the last rendered workbench result", () => {
-    const values = new Map();
-    const storage = {
-      getItem: (key) => values.get(key) ?? null,
-      setItem: (key, value) => values.set(key, value),
-    };
-    const cachedState = {
-      selectedPresetId: "feed",
-      options: { max: 20 },
-      result: {
-        ok: true,
-        command: ["twitter", "feed", "--max", "20", "--json"],
-        data: { data: [{ id: "feed-123", text: "Shipping local agents" }] },
-      },
-      selectedTweetId: "feed-123",
-      rawVisible: false,
-      lastRunMs: 321,
-      likedTweetIds: ["feed-123"],
-      bookmarkedTweetIds: ["feed-456"],
-    };
-
-    saveWorkbenchCache(storage, cachedState);
-
-    expect(loadWorkbenchCache(storage)).toEqual(cachedState);
-  });
-
-  test("ignores invalid cached workbench state", () => {
-    const storage = {
-      getItem: () => "{not-json",
-      setItem: () => {},
-    };
-
-    expect(loadWorkbenchCache(storage)).toBeNull();
   });
 });
 

@@ -8,7 +8,7 @@ import {
   X,
 } from "@lucide/vue";
 import { computed, onActivated, ref, watch } from "vue";
-import { formatDate } from "../lib/workbench";
+import { formatDate } from "../lib/format";
 
 const draftStorageKey = "twitter-workbench-post-ideas-essay-v1";
 let saved = {};
@@ -450,7 +450,6 @@ function rejectIdea(index) {
 
 <style scoped>
 .ideas-view {
-  max-width: 64rem;
   padding-block: 1.5rem 3rem;
 }
 .ideas-heading,

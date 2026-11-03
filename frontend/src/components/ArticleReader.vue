@@ -257,7 +257,7 @@ onUnmounted(() => {
   max-width: 72ch;
   margin-inline: auto;
   color: var(--ink);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--font-interface);
   font-size: 1.125rem;
   line-height: 1.75;
   overflow-wrap: anywhere;

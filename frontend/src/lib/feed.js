@@ -1,4 +1,4 @@
-import { buildTweetActionPayload } from "./workbench";
+import { buildTweetActionPayload } from "./social";
 
 export function isEnglishFeedPost(tweet) {
   const isEnglish = (language) => typeof language === "string" && language.trim().toLowerCase() === "en";
@@ -39,4 +39,11 @@ export function safeMediaUrl(url) {
   } catch {
     return "";
   }
+}
+
+export function mediaAltText(media, index = 0) {
+  for (const value of [media?.altText, media?.alt_text, media?.ext_alt_text, media?.description]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return `Image ${index + 1}. No description provided.`;
 }

@@ -11,13 +11,15 @@ import {
   watch,
 } from "vue";
 import { ExternalLink, Search } from "@lucide/vue";
-import { formatDate } from "../lib/workbench";
+import { formatDate } from "../lib/format";
 import {
   clearRecovery,
   draftKey,
   readRecovery,
   saveRecovery,
   sortProspects,
+  isRedditPost,
+  publicationBlocksPosting,
 } from "../lib/prospects";
 
 const run = ref(null);
@@ -39,12 +41,17 @@ const saving = ref({});
 const saveErrors = ref({});
 const responseLoading = ref({});
 const responseErrors = ref({});
+const posting = ref({});
+const postingErrors = ref({});
 const versions = ref({});
 const versionsLoading = ref({});
 const research = ref(null);
 const researchOpen = ref(false);
 const researchLoading = ref(false);
 const researchError = ref("");
+const redditStatus = ref(null);
+const redditStatusLoading = ref(false);
+const redditStatusError = ref("");
 const resultsHeading = ref(null);
 let active = false;
 let disposed = false;
@@ -57,6 +64,7 @@ const saveRequests = new Map();
 const running = computed(
   () => starting.value || run.value?.status === "running",
 );
+const publishing = computed(() => Object.values(posting.value).some(Boolean));
 const allPosts = computed(() => run.value?.posts || []);
 const sortedPosts = computed(() =>
   sortProspects(
@@ -82,6 +90,7 @@ const visiblePosts = computed(() =>
 const searched = computed(() => run.value?.searched || 0);
 const keyFor = (post) => draftKey(run.value.id, post.url);
 const detailFor = (post) => details.value[keyFor(post)];
+const publicationFor = (post) => detailFor(post)?.publication;
 const textFor = (post) =>
   drafts.value[keyFor(post)] ??
   detailFor(post)?.draft_text ??
@@ -128,6 +137,20 @@ async function request(path, options) {
         : "Could not load customer research. Please retry.",
     );
   return body;
+}
+
+async function loadRedditStatus() {
+  if (redditStatusLoading.value) return;
+  redditStatusLoading.value = true;
+  redditStatusError.value = "";
+  try {
+    const status = await request("/api/prospects/sources/reddit/status");
+    if (!disposed) redditStatus.value = status;
+  } catch {
+    if (!disposed) redditStatusError.value = "Could not check Reddit connection. Research can still use web search.";
+  } finally {
+    if (!disposed) redditStatusLoading.value = false;
+  }
 }
 
 function stopPolling() {
@@ -198,7 +221,7 @@ async function poll() {
 }
 
 async function start() {
-  if (running.value) return;
+  if (running.value || publishing.value) return;
   starting.value = true;
   error.value = "";
   ++latestRequest;
@@ -379,6 +402,43 @@ async function copy(post) {
   }
 }
 
+async function postReply(post) {
+  const key = keyFor(post);
+  const runId = run.value.id;
+  if (posting.value[key] || publicationBlocksPosting(publicationFor(post))) return;
+  const text = textFor(post);
+  posting.value[key] = true;
+  postingErrors.value[key] = "";
+  try {
+    await flushDraft(post);
+    if (saveErrors.value[key]) throw new Error("Save your reply before posting. Use Retry save below.");
+    if (text !== textFor(post)) throw new Error("Your reply changed while saving. Review it before posting.");
+    const publication = await request(`/api/prospects/runs/${runId}/publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({url: post.url, text, username: redditStatus.value?.username || ""}),
+    });
+    if (!disposed && run.value?.id === runId) {
+      details.value[key].publication = publication;
+      notice.value = publication.message;
+    }
+  } catch (failure) {
+    postingErrors.value[key] = failure.message;
+    // An interrupted HTTP response may hide a successful post. Re-read durable
+    // server state before enabling any retry, even if the editor remains open.
+    try {
+      const body = await request(`/api/prospects/runs/${runId}/prospect?url=${encodeURIComponent(post.url)}`);
+      if (!disposed && run.value?.id === runId) details.value[key].publication = body.publication;
+    } catch {
+      if (!disposed && run.value?.id === runId) details.value[key].publication = {
+        status: "uncertain", message: "Posting could not be confirmed. Check Reddit before posting again.",
+      };
+    }
+  } finally {
+    posting.value[key] = false;
+  }
+}
+
 async function loadVersions(post) {
   const key = keyFor(post);
   versionsLoading.value[key] = true;
@@ -431,6 +491,7 @@ async function changePage(value) {
 function activate() {
   if (active) return;
   active = true;
+  loadRedditStatus();
   if (!document.hidden) loadLatest();
 }
 function deactivate() {
@@ -475,7 +536,7 @@ onUnmounted(() => {
       <button
         class="button button-primary"
         type="button"
-        :disabled="running || loading"
+        :disabled="running || loading || publishing"
         @click="start"
       >
         <Search :size="16" aria-hidden="true" />{{
@@ -483,6 +544,26 @@ onUnmounted(() => {
         }}
       </button>
     </header>
+    <section class="reddit-connection" aria-label="Reddit connection">
+      <div class="reddit-connection-heading">
+        <p role="status" aria-live="polite">
+          <strong>Reddit</strong> ·
+          {{ redditStatusLoading ? "Checking connection…" : redditStatusError || redditStatus?.message || "Connection not checked." }}
+          <span v-if="!redditStatusLoading && !redditStatusError && redditStatus?.username"> (u/{{ redditStatus.username }})</span>
+        </p>
+        <button class="button button-quiet" type="button" :disabled="redditStatusLoading" @click="loadRedditStatus">
+          Refresh Reddit status
+        </button>
+      </div>
+      <details v-if="!redditStatus?.authenticated || redditStatusError">
+        <summary>Connect Reddit through Chrome</summary>
+        <p>Install <code>npm install -g @jackwener/opencli@2.0.2</code> on the computer running the backend.
+          Add the <a href="https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk" target="_blank" rel="noopener noreferrer">OpenCLI extension</a>
+          to your signed-in Chrome profile and keep Chrome open. Run <code>opencli doctor</code>,
+          then refresh the status here.</p>
+        <p class="muted">Reddit uses your existing Chrome session. If browser collection is unavailable, research continues with web search.</p>
+      </details>
+    </section>
     <p v-if="error" role="alert" class="error-notice">
       {{ error }}
       <button type="button" class="button button-quiet" @click="loadLatest">
@@ -565,6 +646,8 @@ onUnmounted(() => {
               {{ sourceLabel(post.url)
               }}<template v-if="post.author"> · {{ post.author }}</template> ·
               {{ postDate(post.published_at) }}
+              <template v-if="post.collection_source === 'reddit_cli'"> · Reddit CLI</template>
+              <template v-else-if="post.collection_source === 'web_fallback'"> · Web fallback</template>
             </p>
             <h4 :id="`${postId(post)}-title`" class="prospect-title">
               <a :href="post.url" target="_blank" rel="noopener noreferrer"
@@ -683,10 +766,11 @@ onUnmounted(() => {
             <div class="response-editor">
               <div class="editor-heading">
                 <h5>Reply</h5>
+                <button v-if="!hasDraft(post)" class="button button-quiet" type="button" @click="edit(post, '')">Write a reply</button>
                 <button
                   class="button"
                   type="button"
-                  :disabled="responseLoading[keyFor(post)]"
+                  :disabled="responseLoading[keyFor(post)] || posting[keyFor(post)]"
                   :aria-label="`${hasDraft(post) ? 'Regenerate response to' : 'Suggest a response to'} ${post.title}`"
                   @click="generate(post)"
                 >
@@ -711,6 +795,7 @@ onUnmounted(() => {
                   :value="textFor(post)"
                   :aria-label="`Your reply to ${post.title}`"
                   rows="6"
+                  :readonly="posting[keyFor(post)]"
                   @input="edit(post, $event.target.value)"
                   @blur="flushDraft(post)"
                 ></textarea>
@@ -738,6 +823,32 @@ onUnmounted(() => {
                     {{ copied === keyFor(post) ? "Copied" : "Copy" }}
                   </button>
                 </div>
+                <section v-if="isRedditPost(post.url)" class="reply-publication" aria-label="Post reply on Reddit">
+                  <template v-if="publicationFor(post)">
+                    <p role="status" aria-live="polite">{{ publicationFor(post).message }}</p>
+                    <a v-if="publicationFor(post).status === 'posted' && publicationFor(post).comment_url"
+                      :href="publicationFor(post).comment_url" target="_blank" rel="noopener noreferrer">View posted reply on Reddit</a>
+                    <a v-else-if="publicationBlocksPosting(publicationFor(post))"
+                      :href="post.url" target="_blank" rel="noopener noreferrer">Check the thread on Reddit</a>
+                    <details v-if="publicationFor(post).status === 'posted' && publicationFor(post).text !== textFor(post)">
+                      <summary>Reply that was posted</summary>
+                      <p class="published-text">{{ publicationFor(post).text }}</p>
+                    </details>
+                  </template>
+                  <div v-if="!publicationBlocksPosting(publicationFor(post))" class="editor-footer">
+                    <p class="muted" v-if="redditStatus?.authenticated && redditStatus?.username">
+                      Posts publicly as u/{{ redditStatus.username }}.
+                    </p>
+                    <p class="muted" v-else>Connect Reddit above to post this reply.</p>
+                    <button type="button" class="button button-primary"
+                      :disabled="posting[keyFor(post)] || responseLoading[keyFor(post)] || !redditStatus?.authenticated || !redditStatus?.username || !textFor(post).trim() || textFor(post).length > 10000"
+                      :aria-label="`Post reply on Reddit to ${post.title}`" @click="postReply(post)">
+                      {{ posting[keyFor(post)] ? "Posting…" : "Post on Reddit" }}
+                    </button>
+                  </div>
+                  <p v-if="textFor(post).length > 10000" class="error-text">Shorten this reply to 10,000 characters before posting.</p>
+                  <p v-if="postingErrors[keyFor(post)]" role="alert" class="error-text">{{ postingErrors[keyFor(post)] }}</p>
+                </section>
                 <button
                   v-if="saveErrors[keyFor(post)]"
                   class="button button-quiet"
@@ -919,6 +1030,13 @@ onUnmounted(() => {
               <strong>{{ i + 1 }}. {{ item.query }}</strong>
               <p class="muted">{{ item.theme }} · {{ item.status }}</p>
               <p>{{ item.finding }}</p>
+              <p v-if="item.reddit" class="muted">
+                Reddit CLI: {{ item.reddit.status }} · {{ item.reddit.result_count }} results ·
+                {{ item.reddit.inspected_count }} posts inspected.
+                <template v-if="item.reddit.web_fallback !== 'not_needed'"> Web fallback: {{ item.reddit.web_fallback }}.</template>
+              </p>
+              <p v-if="item.reddit?.error" class="muted">{{ item.reddit.error }}</p>
+              <p v-if="!item.reddit" class="muted">Reddit CLI coverage: not recorded.</p>
             </li>
           </ol>
         </details>
@@ -1004,6 +1122,24 @@ onUnmounted(() => {
 .research-status {
   padding-block: 0.25rem 0.8rem;
   font-size: 0.875rem;
+}
+.reddit-connection {
+  margin-bottom: 1rem;
+  padding-block: 0.5rem 0.8rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+.reddit-connection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.reddit-connection details p {
+  margin-top: 0.5rem;
+  max-width: 75ch;
 }
 .research-status progress {
   display: block;
@@ -1166,6 +1302,18 @@ pre {
   margin-block: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--rule);
+}
+.reply-publication {
+  border-top: 1px solid var(--rule);
+  padding-top: 0.8rem;
+  margin-top: 0.8rem;
+}
+.reply-publication a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.published-text {
+  white-space: pre-wrap;
 }
 .editor-heading h5 {
   font-size: 1rem;

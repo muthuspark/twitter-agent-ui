@@ -11,8 +11,9 @@ import {
   watch,
 } from "vue";
 import { createFeedBlockMatcher } from "../lib/blocklist";
-import { isEnglishFeedPost, mergeFeedPage, safeMediaUrl } from "../lib/feed";
-import { formatDate, formatMetric, tweetUrl } from "../lib/workbench";
+import { isEnglishFeedPost, mediaAltText, mergeFeedPage, safeMediaUrl } from "../lib/feed";
+import { formatDate, formatMetric } from "../lib/format";
+import { tweetUrl } from "../lib/social";
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -33,6 +34,7 @@ const error = ref("");
 let visited = new Set();
 let controller;
 let requestVersion = 0;
+let fitFrame = null;
 const blockMatcher = computed(() => createFeedBlockMatcher(props.blockedTerms));
 const conversation = computed(() =>
   items.value.filter(
@@ -91,20 +93,31 @@ function fitPanel() {
     return;
   }
   const top = Math.max(16, panel.value.getBoundingClientRect().top);
-  panel.value.style.maxHeight = `${Math.max(160, window.innerHeight - top - 16)}px`;
+  const height = `${Math.max(160, window.innerHeight - top - 16)}px`;
+  if (panel.value.style.maxHeight !== height) panel.value.style.maxHeight = height;
+}
+
+function scheduleFit() {
+  if (fitFrame !== null) return;
+  fitFrame = window.requestAnimationFrame(() => {
+    fitFrame = null;
+    fitPanel();
+  });
 }
 
 function activate() {
-  window.addEventListener("scroll", fitPanel, true);
-  window.addEventListener("resize", fitPanel);
-  nextTick(fitPanel);
+  window.addEventListener("scroll", scheduleFit, { capture: true, passive: true });
+  window.addEventListener("resize", scheduleFit);
+  nextTick(scheduleFit);
   if (!items.value.length && !loading.value && !error.value) loadMore();
 }
 
 function deactivate() {
   stop();
-  window.removeEventListener("scroll", fitPanel, true);
-  window.removeEventListener("resize", fitPanel);
+  window.removeEventListener("scroll", scheduleFit, true);
+  window.removeEventListener("resize", scheduleFit);
+  window.cancelAnimationFrame(fitFrame);
+  fitFrame = null;
 }
 
 watch(
@@ -147,7 +160,8 @@ onBeforeUnmount(deactivate);
       <button
         type="button"
         aria-label="Close thread"
-        class="button min-w-11 shrink-0"
+        title="Close thread"
+        class="button button-quiet button-icon button-icon-compact shrink-0"
         @click="$emit('close')"
       >
         <X :size="18" aria-hidden="true" />
@@ -210,7 +224,7 @@ onBeforeUnmount(deactivate);
               :src="safeMediaUrl(media.url)"
               :width="media.width || undefined"
               :height="media.height || undefined"
-              alt="Photo attached to the post"
+              :alt="mediaAltText(media, index)"
               loading="lazy"
               decoding="async"
               referrerpolicy="no-referrer"
@@ -225,15 +239,18 @@ onBeforeUnmount(deactivate);
             /></a>
           </template>
         </div>
-        <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
+        <footer class="feed-post-footer mt-3">
+        <div class="feed-post-metrics">
           <span>{{ formatMetric(tweet.metrics?.likes) }} likes</span
           ><span>{{ formatMetric(tweet.metrics?.retweets) }} reposts</span
           ><span>{{ formatMetric(tweet.metrics?.replies) }} replies</span>
         </div>
-        <div class="mt-3 flex flex-wrap items-center gap-2">
+        <div class="feed-post-actions flex items-center">
           <button
             type="button"
-            class="button"
+            class="button button-quiet button-icon button-icon-compact"
+            :aria-label="likedIds.has(String(tweet.id)) ? 'Liked' : pendingActions[tweet.id] === 'like' ? 'Liking…' : 'Like'"
+            :title="likedIds.has(String(tweet.id)) ? 'Liked' : 'Like'"
             :disabled="
               Boolean(pendingActions[tweet.id]) ||
               likedIds.has(String(tweet.id))
@@ -241,18 +258,13 @@ onBeforeUnmount(deactivate);
             :aria-pressed="likedIds.has(String(tweet.id))"
             @click="$emit('action', tweet, 'like')"
           >
-            <Heart :size="14" aria-hidden="true" />
-            {{
-              likedIds.has(String(tweet.id))
-                ? "Liked"
-                : pendingActions[tweet.id] === "like"
-                  ? "Liking…"
-                  : "Like"
-            }}
+            <Heart :size="18" :fill="likedIds.has(String(tweet.id)) ? 'currentColor' : 'none'" aria-hidden="true" />
           </button>
           <button
             type="button"
-            class="button"
+            class="button button-quiet button-icon button-icon-compact"
+            :aria-label="bookmarkedIds.has(String(tweet.id)) ? 'Bookmarked' : pendingActions[tweet.id] === 'bookmark' ? 'Saving…' : 'Bookmark'"
+            :title="bookmarkedIds.has(String(tweet.id)) ? 'Bookmarked' : 'Bookmark'"
             :disabled="
               Boolean(pendingActions[tweet.id]) ||
               bookmarkedIds.has(String(tweet.id))
@@ -260,23 +272,19 @@ onBeforeUnmount(deactivate);
             :aria-pressed="bookmarkedIds.has(String(tweet.id))"
             @click="$emit('action', tweet, 'bookmark')"
           >
-            <Bookmark :size="14" aria-hidden="true" />
-            {{
-              bookmarkedIds.has(String(tweet.id))
-                ? "Bookmarked"
-                : pendingActions[tweet.id] === "bookmark"
-                  ? "Saving…"
-                  : "Bookmark"
-            }}
+            <Bookmark :size="18" :fill="bookmarkedIds.has(String(tweet.id)) ? 'currentColor' : 'none'" aria-hidden="true" />
           </button>
           <a
             :href="tweetUrl(tweet)"
             target="_blank"
             rel="noreferrer"
-            class="button"
-            >Open on X <ExternalLink :size="13" aria-hidden="true"
+            class="button button-quiet button-icon button-icon-compact"
+            aria-label="Open on X"
+            title="Open on X"
+            ><ExternalLink :size="18" aria-hidden="true"
           /></a>
         </div>
+        </footer>
         <p
           v-if="actionErrors[tweet.id]"
           class="mt-3 text-sm text-danger"

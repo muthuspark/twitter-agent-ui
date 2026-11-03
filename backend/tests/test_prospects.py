@@ -33,6 +33,11 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(prospects, "_ACTIVE", None)
     monkeypatch.setattr(prospects, "source_snapshot", snapshot)
     monkeypatch.setattr(prospects, "search_product_code", lambda *args: [])
+    monkeypatch.setattr(prospects.reddit_cli, "close_research", lambda: None)
+    # These existing pipeline tests supply their own multi-platform web researcher.
+    monkeypatch.setattr(prospects.reddit_cli, "connection_status", lambda: {
+        "authenticated": False, "message": "Reddit CLI unavailable in web pipeline tests.",
+    })
 
 
 @pytest.mark.parametrize("url, expected", [
@@ -93,7 +98,7 @@ def seed_run():
             "posts": [], "warnings": [], "error": ""}
 
 
-def test_all_twenty_queries_run_and_posts_deduplicate(isolated, monkeypatch):
+def test_all_twenty_queries_run_and_posts_deduplicate_with_reddit_fallback(isolated, monkeypatch):
     calls = []
     def research(group, now):
         calls.extend(q["query"] for q in group)
@@ -104,7 +109,7 @@ def test_all_twenty_queries_run_and_posts_deduplicate(isolated, monkeypatch):
     prospects.execute_run(seed_run())
     result = prospects.get_run("test-run")
     assert len(calls) == len(set(calls)) == 20
-    assert result["status"] == "complete"
+    assert result["status"] == "partial"  # Web fallback does not confirm CLI coverage.
     assert len(result["posts"]) == 1
     assert result["posts"][0]["url"] == "https://www.reddit.com/r/saas/comments/abc123/"
 

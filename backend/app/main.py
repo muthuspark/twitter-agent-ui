@@ -11,7 +11,6 @@ from pydantic import BaseModel
 from app.analytics import AnalyticsConfigurationError, AnalyticsDataError, fetch_analytics_summary
 from app.articles import ArticleLinkError, ArticleContentError, fetch_article
 from app.config import load_environment
-from app.models import Preset, PresetField, RunRequest, RunResponse
 from app.codex_client import (
     CodexConfigurationError,
     CodexError,
@@ -27,12 +26,12 @@ from app.storage import GrowthStore
 from app.interests import collect_interest_context
 from app.feed import fetch_feed_page
 from app.trends import ResearchError, fetch_trending_research
+from app.reddit_cli import connection_status as reddit_connection_status
 from app.prospects import (
     get_run as get_prospect_run, start_run as start_prospect_run, suggest_response,
-    compact_run, run_progress, research_details, get_prospect, save_draft, draft_versions,
+    compact_run, run_progress, research_details, get_prospect, save_draft, draft_versions, publish_reply,
 )
 from app.twitter_cli import (
-    PRESETS,
     CliExecutionError,
     CliNotFoundError,
     CliTimeoutError,
@@ -43,12 +42,12 @@ from app.twitter_cli import (
     resolve_search_query,
     run_growth_action,
     run_post_action,
-    run_twitter_command,
+    search_tweets,
 )
 
 load_environment()
 
-app = FastAPI(title="Twitter CLI Workbench API")
+app = FastAPI(title="Twitter Agent API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -80,6 +79,11 @@ def article_read(request: ArticleRequest):
         raise HTTPException(status_code=504, detail="Loading this X article timed out. Please retry.") from exc
     except CliNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/prospects/sources/reddit/status")
+def prospect_reddit_status():
+    return reddit_connection_status()
 
 
 @app.post("/api/prospects/runs")
@@ -129,6 +133,20 @@ def prospect_detail(run_id: str, url: str = Query(...)):
 class ProspectDraftRequest(BaseModel):
     url: str
     text: str
+
+
+class ProspectPublishRequest(ProspectDraftRequest):
+    username: str
+
+
+@app.post("/api/prospects/runs/{run_id}/publish")
+def prospect_publish_reply(run_id: str, request: ProspectPublishRequest):
+    try:
+        return publish_reply(run_id, request.url, request.text, request.username)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.put("/api/prospects/runs/{run_id}/draft")
@@ -228,43 +246,6 @@ def analytics_summary(start_date: str = "28daysAgo", end_date: str = "yesterday"
     }
 
 
-@app.get("/api/presets")
-def presets() -> dict[str, list[Preset]]:
-    result: list[Preset] = []
-    for preset in PRESETS.values():
-        fields: list[PresetField] = []
-        if preset.requires_query:
-            fields.append(
-                PresetField(
-                    name="query",
-                    label="Query",
-                    type="text",
-                    required=False,
-                )
-            )
-        if preset.supports_max:
-            fields.append(
-                PresetField(
-                    name="max",
-                    label="Max results",
-                    type="number",
-                    required=False,
-                    default=20,
-                    min=1,
-                    max=100,
-                )
-            )
-        result.append(
-            Preset(
-                id=preset.id,
-                label=preset.label,
-                description=preset.description,
-                fields=fields,
-            )
-        )
-    return {"presets": result}
-
-
 @app.get("/api/feed")
 def home_feed(
     cursor: str | None = Query(default=None, max_length=4096),
@@ -296,30 +277,12 @@ def feed_thread(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@app.post("/api/run", response_model=RunResponse)
-def run_command(request: RunRequest) -> RunResponse:
-    try:
-        result = run_twitter_command(request.preset, request.options)
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except CliNotFoundError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except CliTimeoutError as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
-    except InvalidCliOutputError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except CliExecutionError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    return RunResponse(ok=True, command=result.command, data=result.data)
-
-
 @app.post("/api/growth/discover")
 def growth_discover(request: dict[str, Any]) -> dict[str, Any]:
     query = resolve_search_query(request.get("query"))
     max_results = request.get("max", 20)
     try:
-        result = run_twitter_command("search", {"query": query, "max": max_results})
+        result = search_tweets(query, max_results)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CliNotFoundError as exc:

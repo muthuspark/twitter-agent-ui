@@ -1,5 +1,16 @@
 export const draftKey = (runId, url) => `twitter-workbench:prospect-draft:v1:${runId}:${url}`;
 
+export function isRedditPost(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && ["reddit.com", "www.reddit.com", "old.reddit.com"].includes(parsed.hostname)
+      && !parsed.username && !parsed.password && !parsed.port
+      && /^\/r\/[^/]+\/comments\/[a-z0-9]+(?:\/|$)/i.test(parsed.pathname);
+  } catch { return false; }
+}
+
+export const publicationBlocksPosting = publication => ["pending", "posted", "uncertain"].includes(publication?.status);
+
 export function readRecovery(storage, key) {
   try {
     const value = JSON.parse(storage.getItem(key));

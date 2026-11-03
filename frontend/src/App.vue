@@ -1,13 +1,9 @@
 <script setup>
 import { computed, defineAsyncComponent, ref, watch } from "vue";
+import { ArrowUp } from "@lucide/vue";
 
 // Each screen owns its data and lifecycle. Load it on first visit and retain its state.
 const views = [
-  {
-    id: "workbench",
-    label: "Workbench",
-    component: defineAsyncComponent(() => import("./components/Workbench.vue")),
-  },
   {
     id: "feeds",
     label: "Feed",
@@ -42,11 +38,19 @@ const views = [
 ];
 const initialArticleUrl =
   new URL(window.location.href).searchParams.get("article") || "";
-const activeTab = ref(initialArticleUrl ? "articleReader" : "workbench");
+const activeTab = ref(initialArticleUrl ? "articleReader" : "feeds");
 const activeView = computed(() =>
   views.find((view) => view.id === activeTab.value),
 );
 const articleReady = ref(false);
+
+function backToTop() {
+  const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? "instant"
+    : "smooth";
+  window.scrollTo({ top: 0, behavior });
+  document.getElementById("feed-thread")?.scrollTo({ top: 0, behavior });
+}
 
 function rememberArticle(url) {
   if (activeTab.value !== "articleReader") return;
@@ -81,7 +85,7 @@ watch(activeTab, (tab) => {
   >
     <div class="manuscript-shell">
       <header class="manuscript-header">
-        <h1 class="sr-only">Twitter workbench</h1>
+        <h1 class="sr-only">Twitter Agent</h1>
         <nav aria-label="Main navigation" class="manuscript-nav">
           <button
             v-for="view in views"
@@ -95,6 +99,13 @@ watch(activeTab, (tab) => {
             {{ view.label }}
           </button>
         </nav>
+        <div
+          v-show="activeTab === 'feeds'"
+          id="feed-nav-actions"
+          class="feed-nav-actions"
+          role="group"
+          aria-label="Feed controls"
+        ></div>
       </header>
       <KeepAlive>
         <component
@@ -104,5 +115,14 @@ watch(activeTab, (tab) => {
         />
       </KeepAlive>
     </div>
+    <button
+      type="button"
+      class="button button-icon back-to-top"
+      aria-label="Back to top"
+      title="Back to top"
+      @click="backToTop"
+    >
+      <ArrowUp :size="20" aria-hidden="true" />
+    </button>
   </div>
 </template>

@@ -211,7 +211,7 @@ def fetch_trending_research(*, now=None, client=None, editorial_context=None):
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(days=WINDOW_DAYS)
     owned = client is None
-    client = client or httpx.Client(timeout=10, follow_redirects=True, headers={"User-Agent": "TwitterWorkbench/0.1"})
+    client = client or httpx.Client(timeout=10, follow_redirects=True, headers={"User-Agent": "TwitterAgent/0.1"})
     jobs = [
         ("Hacker News", lambda: fetch_hacker_news(client, since, now)),
         ("GitHub", lambda: fetch_github(client, since, now)),

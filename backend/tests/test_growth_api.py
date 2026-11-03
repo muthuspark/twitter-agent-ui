@@ -39,9 +39,8 @@ def test_bookmark_executes_cli_and_records_history(monkeypatch, tmp_path):
 def test_growth_discover_returns_candidates(monkeypatch):
     from app import main
 
-    def fake_run(preset, options):
-        assert preset == "search"
-        assert options["query"] == "AI agents startups"
+    def fake_run(query, limit):
+        assert query == "AI agents startups"
         return CliResult(
             command=["twitter", "search", "AI agents startups", "--max", "2", "--json"],
             data={
@@ -57,7 +56,7 @@ def test_growth_discover_returns_candidates(monkeypatch):
             },
         )
 
-    monkeypatch.setattr(main, "run_twitter_command", fake_run)
+    monkeypatch.setattr(main, "search_tweets", fake_run)
     client = TestClient(main.app)
 
     response = client.post("/api/growth/discover", json={"query": "AI agents startups", "max": 2})
@@ -73,15 +72,14 @@ def test_growth_discover_uses_random_jovis_query_when_query_is_empty(monkeypatch
 
     monkeypatch.setattr(main, "resolve_search_query", lambda query: "data team bottleneck")
 
-    def fake_run(preset, options):
-        assert preset == "search"
-        assert options["query"] == "data team bottleneck"
+    def fake_run(query, limit):
+        assert query == "data team bottleneck"
         return CliResult(
             command=["twitter", "search", "data team bottleneck", "--max", "2", "--json"],
             data={"ok": True, "data": []},
         )
 
-    monkeypatch.setattr(main, "run_twitter_command", fake_run)
+    monkeypatch.setattr(main, "search_tweets", fake_run)
     client = TestClient(main.app)
 
     response = client.post("/api/growth/discover", json={"query": "", "max": 2})
@@ -104,7 +102,7 @@ def test_growth_discover_excludes_already_commented_posts(monkeypatch, tmp_path)
         result={"ok": True},
     )
 
-    def fake_run(preset, options):
+    def fake_run(query, limit):
         return CliResult(
             command=["twitter", "search", "AI agents", "--max", "2", "--json"],
             data={
@@ -126,7 +124,7 @@ def test_growth_discover_excludes_already_commented_posts(monkeypatch, tmp_path)
             },
         )
 
-    monkeypatch.setattr(main, "run_twitter_command", fake_run)
+    monkeypatch.setattr(main, "search_tweets", fake_run)
     monkeypatch.setattr(main, "get_growth_store", lambda: store)
     client = TestClient(main.app)
 

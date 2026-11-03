@@ -1,12 +1,10 @@
 <script setup>
 import {
   AlertCircle,
-  ArrowUp,
   Ban,
   Bookmark,
   ExternalLink,
   Heart,
-  MessageSquare,
   RefreshCw,
   Repeat2,
   X,
@@ -20,9 +18,11 @@ import {
   ref,
   watch,
 } from "vue";
-import { formatDate, formatMetric, tweetUrl } from "../lib/workbench";
+import { formatDate, formatMetric } from "../lib/format";
+import { tweetUrl } from "../lib/social";
 import {
   isEnglishFeedPost,
+  mediaAltText,
   mergeFeedPage,
   safeMediaUrl,
   submitFeedAction,
@@ -41,6 +41,12 @@ const blockListOpen = ref(false);
 async function toggleBlockList() {
   if (!blockListOpen.value) await closeThread();
   blockListOpen.value = !blockListOpen.value;
+}
+
+async function editBlockList() {
+  blockListOpen.value = true;
+  await nextTick();
+  document.getElementById("new-blocked-term")?.focus();
 }
 
 const tweets = ref([]);
@@ -130,10 +136,11 @@ async function closeThread() {
   selectedPost.value = null;
   await nextTick();
   window.scrollTo({ top: savedFeedScroll, behavior: "instant" });
-  document
+  const trigger = document
     .querySelector(
       `[data-post-id="${CSS.escape(String(id))}"] [data-thread-toggle]`,
-    )
+    );
+  (trigger || document.getElementById("feed-block-list-toggle"))
     ?.focus({ preventScroll: true });
 }
 
@@ -158,21 +165,26 @@ function blockText(value) {
     closeContextMenu();
     window.getSelection()?.removeAllRanges();
     selectedText.value = null;
-    if (fromSelection)
-      nextTick(() => {
-        const target =
-          document.getElementById("feed-block-list-toggle") ||
-          document.getElementById("feed-thread-heading");
-        target?.focus({ preventScroll: true });
-      });
+    nextTick(() => {
+      const target = fromSelection
+        ? document.getElementById("feed-thread-heading") ||
+          document.getElementById("feed-block-list-toggle")
+        : document.getElementById("new-blocked-term");
+      target?.focus({ preventScroll: true });
+    });
   } catch (failure) {
     blockError.value = failure.message;
   }
 }
 
-function unblockText(term) {
+async function unblockText(term) {
+  const index = blockedTerms.value.indexOf(term);
   persistBlockList(blockedTerms.value.filter((item) => item !== term));
   blockNotice.value = `“${term}” removed from your block list.`;
+  await nextTick();
+  const buttons = document.querySelectorAll("[data-unblock-term]");
+  (buttons[Math.min(index, buttons.length - 1)] ||
+    document.getElementById("new-blocked-term"))?.focus({ preventScroll: true });
 }
 
 function getSelectedFeedText() {
@@ -399,45 +411,41 @@ onBeforeUnmount(stop);
 </script>
 
 <template>
+  <Teleport to="#feed-nav-actions">
+    <button
+      id="feed-block-list-toggle"
+      class="button button-quiet"
+      type="button"
+      :aria-expanded="blockListOpen"
+      aria-controls="feed-block-list"
+      @click="toggleBlockList"
+    >
+      Block list<span v-if="blockedTerms.length">({{ blockedTerms.length }})</span>
+    </button>
+    <button
+      type="button"
+      class="button button-quiet button-icon"
+      aria-label="Refresh feed"
+      title="Refresh feed"
+      :disabled="loading"
+      @click="loadMore({ refresh: true })"
+    >
+      <RefreshCw
+        :size="17"
+        :class="{ 'animate-spin': loading }"
+        aria-hidden="true"
+      />
+    </button>
+  </Teleport>
   <main
     id="feed-top"
     class="feeds-view"
+    aria-label="Feed"
     :class="{ 'has-thread': selectedPost }"
     @contextmenu="openSelectionMenu"
   >
     <div class="feed-columns">
       <div class="feed-timeline-column">
-        <header class="feeds-heading">
-          <h2 class="text-2xl font-bold">Feed</h2>
-          <div class="flex flex-wrap items-center gap-2">
-            <button
-              id="feed-block-list-toggle"
-              class="button"
-              type="button"
-              :aria-expanded="blockListOpen"
-              aria-controls="feed-block-list"
-              @click="toggleBlockList"
-            >
-              Block list<span v-if="blockedTerms.length">
-                ({{ blockedTerms.length }})</span
-              >
-            </button>
-            <button
-              type="button"
-              class="button"
-              :disabled="loading"
-              @click="loadMore({ refresh: true })"
-            >
-              <RefreshCw
-                :size="15"
-                :class="{ 'animate-spin': loading }"
-                aria-hidden="true"
-              />
-              Refresh
-            </button>
-          </div>
-        </header>
-
         <section
           v-if="blockListOpen"
           id="feed-block-list"
@@ -460,7 +468,7 @@ onBeforeUnmount(stop);
                 id="new-blocked-term"
                 v-model="newBlockedTerm"
                 maxlength="200"
-                                class="min-h-11 border border-rule-strong bg-paper px-3"
+                class="min-h-11 border border-rule-strong bg-paper px-3"
               />
             </label>
             <button
@@ -483,6 +491,7 @@ onBeforeUnmount(stop);
             >
               <span class="min-w-0 break-words">{{ term }}</span>
               <button
+                data-unblock-term
                 type="button"
                 class="inline-flex min-h-11 shrink-0 items-center gap-1 text-muted hover:text-ink"
                 :aria-label="`Unblock ${term}`"
@@ -543,11 +552,19 @@ onBeforeUnmount(stop);
               {{ tweet.retweetedBy }} reposted
             </p>
             <header class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <strong>{{
+              <a
+                data-thread-toggle
+                :href="tweetUrl(tweet)"
+                class="font-semibold hover:underline underline-offset-4"
+                :aria-label="`Open thread by ${tweet.author?.name || tweet.author?.screenName || 'Unknown author'}`"
+                :aria-expanded="String(selectedPost?.id) === String(tweet.id)"
+                aria-controls="feed-thread"
+                @click.stop.prevent="openThread(tweet)"
+              >{{
                 tweet.author?.name ||
                 tweet.author?.screenName ||
                 "Unknown author"
-              }}</strong>
+              }}</a>
               <span v-if="tweet.author?.screenName" class="text-sm text-muted"
                 >@{{ tweet.author.screenName }}</span
               >
@@ -594,7 +611,7 @@ onBeforeUnmount(stop);
                   :src="safeMediaUrl(media.url)"
                   :width="media.width || undefined"
                   :height="media.height || undefined"
-                  alt="Photo attached to the post"
+                  :alt="mediaAltText(media, index)"
                   loading="lazy"
                   decoding="async"
                   referrerpolicy="no-referrer"
@@ -613,26 +630,19 @@ onBeforeUnmount(stop);
             </div>
 
             <footer
-              class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted"
+              class="feed-post-footer mt-3"
             >
+              <div class="feed-post-metrics">
               <span>{{ formatMetric(tweet.metrics?.likes) }} likes</span>
               <span>{{ formatMetric(tweet.metrics?.retweets) }} reposts</span>
               <span>{{ formatMetric(tweet.metrics?.replies) }} replies</span>
-            </footer>
-            <div class="mt-3 flex flex-wrap items-center gap-2">
-              <button
-                data-thread-toggle
-                type="button"
-                class="button"
-                :aria-expanded="String(selectedPost?.id) === String(tweet.id)"
-                aria-controls="feed-thread"
-                @click.stop="openThread(tweet)"
-              >
-                <MessageSquare :size="15" aria-hidden="true" /> View thread
-              </button>
+              </div>
+            <div class="feed-post-actions flex items-center">
               <button
                 type="button"
-                class="button"
+                class="button button-quiet button-icon button-icon-compact"
+                :aria-label="likedIds.has(String(tweet.id)) ? 'Liked' : pendingActions[tweet.id] === 'like' ? 'Liking…' : 'Like'"
+                :title="likedIds.has(String(tweet.id)) ? 'Liked' : 'Like'"
                 :class="{ 'text-accent': likedIds.has(String(tweet.id)) }"
                 :disabled="
                   Boolean(pendingActions[tweet.id]) ||
@@ -642,23 +652,18 @@ onBeforeUnmount(stop);
                 @click="actOnPost(tweet, 'like')"
               >
                 <Heart
-                  :size="15"
+                  :size="18"
                   :fill="
                     likedIds.has(String(tweet.id)) ? 'currentColor' : 'none'
                   "
                   aria-hidden="true"
                 />
-                {{
-                  likedIds.has(String(tweet.id))
-                    ? "Liked"
-                    : pendingActions[tweet.id] === "like"
-                      ? "Liking…"
-                      : "Like"
-                }}
               </button>
               <button
                 type="button"
-                class="button"
+                class="button button-quiet button-icon button-icon-compact"
+                :aria-label="bookmarkedIds.has(String(tweet.id)) ? 'Bookmarked' : pendingActions[tweet.id] === 'bookmark' ? 'Saving…' : 'Bookmark'"
+                :title="bookmarkedIds.has(String(tweet.id)) ? 'Bookmarked' : 'Bookmark'"
                 :class="{ 'text-accent': bookmarkedIds.has(String(tweet.id)) }"
                 :disabled="
                   Boolean(pendingActions[tweet.id]) ||
@@ -668,7 +673,7 @@ onBeforeUnmount(stop);
                 @click="actOnPost(tweet, 'bookmark')"
               >
                 <Bookmark
-                  :size="15"
+                  :size="18"
                   :fill="
                     bookmarkedIds.has(String(tweet.id))
                       ? 'currentColor'
@@ -676,26 +681,23 @@ onBeforeUnmount(stop);
                   "
                   aria-hidden="true"
                 />
-                {{
-                  bookmarkedIds.has(String(tweet.id))
-                    ? "Bookmarked"
-                    : pendingActions[tweet.id] === "bookmark"
-                      ? "Saving…"
-                      : "Bookmark"
-                }}
               </button>
               <a
                 :href="tweetUrl(tweet)"
                 target="_blank"
                 rel="noreferrer"
-                class="button"
+                class="button button-quiet button-icon button-icon-compact"
+                aria-label="Open on X"
+                title="Open on X"
               >
-                Open on X <ExternalLink :size="14" aria-hidden="true" />
+                <ExternalLink :size="18" aria-hidden="true" />
               </a>
+            </div>
+            </footer>
               <button
                 v-if="selectedText?.postId === String(tweet.id)"
                 type="button"
-                class="button"
+                class="button mt-2"
                 @pointerdown.prevent
                 @click="blockText(selectedText.text)"
               >
@@ -704,7 +706,6 @@ onBeforeUnmount(stop);
                   >Block “{{ selectedText.text }}”</span
                 >
               </button>
-            </div>
             <p
               v-if="actionErrors[tweet.id]"
               class="mt-3 text-sm text-danger"
@@ -722,12 +723,15 @@ onBeforeUnmount(stop);
           aria-label="Loading posts"
         >
           <span class="text-sm text-muted">Loading your timeline…</span>
-          <div
-            v-if="!tweets.length"
-            v-for="index in 3"
-            :key="index"
-            class="h-36 animate-pulse border-b border-rule bg-paper-shade"
-          ></div>
+          <div v-if="!tweets.length" aria-hidden="true">
+            <div v-for="index in 3" :key="index" class="feed-skeleton">
+              <div class="feed-skeleton-author"></div>
+              <div class="feed-skeleton-line"></div>
+              <div class="feed-skeleton-line"></div>
+              <div class="feed-skeleton-line feed-skeleton-short"></div>
+              <div class="feed-skeleton-actions"></div>
+            </div>
+          </div>
         </div>
         <div
           v-else-if="!visibleTweets.length && !error"
@@ -737,6 +741,19 @@ onBeforeUnmount(stop);
             <strong>{{
               tweets.length ? "No matching posts" : "No posts yet"
             }}</strong>
+            <p class="mt-2 text-sm text-muted">
+              {{ tweets.length
+                ? "Only English posts are shown. Your block list may also hide posts."
+                : "Your home timeline is empty. Refresh to check for new posts." }}
+            </p>
+            <button
+              v-if="blockedTerms.length"
+              class="button mt-4"
+              type="button"
+              @click="editBlockList"
+            >
+              Edit block list
+            </button>
           </div>
         </div>
 
@@ -757,12 +774,6 @@ onBeforeUnmount(stop);
           <p v-if="!hasMore && tweets.length" class="text-sm text-muted">
             End of feed
           </p>
-          <a
-            v-if="tweets.length"
-            href="#feed-top"
-            class="mt-4 inline-flex min-h-11 items-center gap-2 text-xs text-muted underline underline-offset-4"
-            ><ArrowUp :size="14" aria-hidden="true" /> Back to top</a
-          >
         </div>
       </div>
       <FeedThread

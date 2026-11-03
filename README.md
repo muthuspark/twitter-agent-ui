@@ -1,8 +1,6 @@
-# Twitter CLI Workbench
+# Twitter Agent
 
 Minimal Vue/Vite + FastAPI UI for the installed `twitter` CLI.
-
-![Twitter CLI Workbench UI](./twitui.png)
 
 ## Prerequisites
 
@@ -69,14 +67,15 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
-The first screen fetches real data with `twitter feed --max 20 --json` through the FastAPI backend.
+The app opens on Feed, which fetches the timeline through the FastAPI backend. The former Workbench screen, command presets, raw command runner and result inspector have been removed.
 
 ## Frontend structure
 
-- `App.vue` owns navigation and article deep links. Its view list defines the six
+- `App.vue` owns navigation and article deep links. Its view list defines the five
   screens; screens load on first visit and retain their state through `KeepAlive`.
-- `components/Workbench.vue` owns command presets, execution and the existing
-  browser cache. `Feeds.vue` owns its timeline, thread and block list.
+- `components/Feeds.vue` owns its timeline, thread and block list and is the
+  default screen. Shared date/number formatting lives in `lib/format.js`; shared
+  social action payloads and links live in `lib/social.js`.
 - Each screen owns its requests and lifecycle. Feed paging and customer polling
   stop when their screen is inactive. A draft operation can finish while another
   screen is open without discarding the draft.
@@ -90,6 +89,11 @@ Keep visible copy to task names, controls, data and actionable state. Use layout
 and ordering to explain the workflow. Put supporting evidence and configuration
 behind named disclosures; keep accessible labels even when their visible duplicate
 is removed. Preserve draft storage keys, API payloads and explicit publishing actions.
+
+The legacy `GET /api/presets` and `POST /api/run` endpoints and their request
+models have been removed. X search, bookmarks and identity reads remain dedicated
+helpers for the other features. Existing Post Ideas and Customers draft storage
+keys remain compatible with saved drafts.
 
 ## Growth Mode
 
@@ -236,10 +240,11 @@ feed position. Escape closes the thread (or dismisses the text context menu firs
 ## Potential Customers
 
 The **Customers** tab runs 20 problem-focused queries across public X,
-Reddit, LinkedIn and Hacker News using Codex live web research. It opens original
+Reddit, LinkedIn and Hacker News. Reddit uses OpenCLI and your signed-in Chrome;
+X, LinkedIn and Hacker News use Codex live web research. It opens original
 posts, distinguishes personal pain from vendor promotion, and compares prospect
-requirements with the current local Jovis source. It never contacts people or
-publishes replies. X access is not required; inaccessible platforms and failed
+requirements with the current local Jovis source. Research never contacts people
+or publishes replies automatically. X access is not required; inaccessible platforms and failed
 search groups appear as limitations rather than invented results.
 
 Click **Find customers**. The background run publishes partial results
@@ -252,6 +257,106 @@ process for research coordination.
 - `JOVIS_REPO_PATH`: defaults to the sibling `../agent` repository. Inspection is
   read-only and never changes Jovis. Missing source stops research with an error.
 - `PROSPECTS_DB_PATH`: optional override for the research database.
+- `OPENCLI_PATH`: optional path to the `opencli` executable when it is not on the
+  backend's PATH. This is a path, not a shell command.
+- `OPENCLI_PROFILE`: optional connected Chrome profile alias/context ID. With
+  multiple profiles, choose explicitly using `opencli profile list`.
+- `REDDIT_CLI_BACKEND`: defaults to `opencli`. Set `rdt` only to opt into the legacy
+  cookie client (`uv tool install rdt-cli==0.4.1`, then `rdt login`). That optional
+  client uses `REDDIT_CLI_PATH` when provided; it can be blocked even with valid
+  cookies, so the app does not automatically fall back to it.
+
+### Connect Reddit
+
+Install the supported CLI release on the machine running the backend:
+
+```bash
+npm install -g @jackwener/opencli@2.0.2
+```
+
+Add the [OpenCLI Browser Bridge extension](https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk)
+to the Chrome profile where you use Reddit. Sign in to reddit.com normally and
+keep Chrome open. Verify the connection from the backend machine:
+
+```bash
+opencli doctor
+opencli reddit whoami
+```
+
+The Customers tab shows Reddit connection status and a **Refresh Reddit status**
+button. Its status endpoint is `GET /api/prospects/sources/reddit/status`.
+The backend must reach OpenCLI's local daemon and the connected Chrome profile.
+Refresh browser login normally if necessary. Restart the backend after changing
+its PATH or environment configuration.
+
+The app verifies identity through `opencli reddit whoami`. Search navigates a
+dedicated browser search tab and reads its rendered result units; OpenCLI's built-in
+fetch-based search can hit a login wall even when browser navigation works.
+The app reads selected posts with `opencli reddit read`, using the search result's
+date and permalink and the reader's original text/author. Empty results require
+an explicit empty-state message; loading pages and markup changes become errors.
+Each worker owns its own search session, which is released after the run without
+closing user tabs.
+
+Reddit searches use the same 20 queries, relevance sorting, a past-month filter,
+and at most 10 results per query. Codex selects up to three candidates per query
+without browsing. Each selected post is fetched by ID with up to 25 comments;
+post IDs are deduplicated across the run. Comments provide context, not separate
+leads. Deleted/removed posts and vendor pitches are excluded. Pain quotes must
+match the fetched original title or body; author, date and URL come from CLI data.
+Partial comment coverage is labeled. No exhaustive comment expansion or pagination
+is performed in this version.
+
+The adapter uses the existing browser session without exporting cookies. The app
+never accepts cookie uploads or puts credentials or raw CLI diagnostics into AI
+prompts, research records or API responses. It only invokes identity checks,
+read-only search-page navigation/extraction, post reading, and owned-tab cleanup.
+The separate **Post on Reddit** action publishes only the reply you choose in the
+editor. It does not expose messaging, voting or subscription commands.
+
+Missing authentication, CLI errors or rate limits do not stop the other platforms.
+Reddit web search is allowed as an explicitly labeled fallback, and does not count
+as a successful CLI search. Rate limits or authentication/access failures suspend
+further Reddit CLI requests for that run. Research details show per-query CLI
+status, returned/inspected counts, errors and fallback attempts. Successful empty
+searches count as searched. Coverage failures make a run partial; old saved runs
+show Reddit coverage as not recorded. CLI calls run sequentially with a 60-second
+timeout. The existing 20-query counter counts a query when either CLI search or
+web research succeeded; it is not a count of successful searches on every platform.
+
+For a local smoke test after login:
+
+```bash
+opencli reddit whoami
+opencli reddit read POST_ID --limit 25 --depth 1 --max-length 40000
+```
+
+Use an actual Reddit post ID in place of `POST_ID`, then run **Find customers**
+to test the app's browser-backed search. OpenCLI 2.0.2 returns `ok/data/error` JSON
+envelopes; unsupported responses are reported instead of accepted as empty results.
+Post reads request up to 25 top-level comments, with no reply or "more comments"
+expansion. Their coverage is always labeled partial because the reader's output
+does not certify completeness. Search navigation and browser reads were verified
+with extension 1.0.26.
+
+### Product assessment and review
+
+In **Review and reply**, edit the suggested reply or choose **Write a reply** to
+start from scratch. Drafts autosave and retain version history. For Reddit posts,
+**Post on Reddit** publishes the exact editor text as a top-level comment using
+the account displayed next to the button. Chrome must remain connected. The
+backend rechecks that account immediately before submission and saves the reviewed
+text first. Other platforms retain their existing edit/copy workflow.
+
+`POST /api/prospects/runs/{run_id}/publish` accepts `url`, `text`, and `username`,
+and returns a publication status and comment link when confirmed. Posting is
+limited to saved Reddit prospects and replies of 1–10,000 characters. Publication
+records persist per Reddit thread across research runs, so repeated clicks do not
+duplicate a confirmed or in-flight reply. Definite rejections may be retried
+manually; timeouts or missing confirmation pause further posting for that thread
+and direct you to check Reddit. Existing replies are not edited by changing the
+draft after publication. Posting code is tested with mocked Reddit responses;
+automated verification does not publish test comments to real discussions.
 
 The code inspection extracts connector interfaces, read/write tool inventories,
 and selected commitment, journal, scheduling and delivery policy excerpts. It

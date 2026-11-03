@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { clearRecovery, draftKey, readRecovery, saveRecovery, sortProspects } from "./prospects";
+import { clearRecovery, draftKey, readRecovery, saveRecovery, sortProspects, isRedditPost, publicationBlocksPosting } from "./prospects";
+
+describe("reply publication eligibility", () => {
+  it("only enables Reddit discussion destinations", () => {
+    expect(isRedditPost("https://www.reddit.com/r/saas/comments/abc123/")).toBe(true);
+    for (const url of ["https://reddit.com.evil.test/r/saas/comments/abc123/", "https://user:pass@reddit.com/r/saas/comments/abc123/", "https://reddit.com/r/saas/", "https://x.com/a/status/123", "invalid"])
+      expect(isRedditPost(url)).toBe(false);
+  });
+  it("prevents repeats after success or an uncertain outcome, while allowing definite failures to retry", () => {
+    for (const status of ["pending", "posted", "uncertain"]) expect(publicationBlocksPosting({status})).toBe(true);
+    expect(publicationBlocksPosting({status:"failed"})).toBe(false);
+    expect(publicationBlocksPosting(null)).toBe(false);
+  });
+});
 
 const storage = () => { const data = new Map(); return { getItem: k => data.get(k) ?? null, setItem: (k,v) => data.set(k,v), removeItem: k => data.delete(k) }; };
 

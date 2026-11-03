@@ -19,6 +19,23 @@ def serialize_feed_tweet(tweet, serialize):
     return data
 
 
+def media_descriptions(payload):
+    """Keep author alt text that the CLI's media model drops."""
+    descriptions = {}
+    pending = [payload]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            url = value.get("media_url_https")
+            alt = value.get("ext_alt_text")
+            if isinstance(url, str) and isinstance(alt, str) and alt.strip():
+                descriptions[url] = alt.strip()
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return descriptions
+
+
 def fetch_page(client, cursor, count, *, parse_timeline, serialize, features, tweet_id=None):
     variables = {
         "count": count,
@@ -52,6 +69,11 @@ def fetch_page(client, cursor, count, *, parse_timeline, serialize, features, tw
         raise ValueError("Twitter returned an unrecognized home timeline response")
     tweets, next_cursor = parse_timeline(payload, lambda _: instructions)
     unique = {str(tweet.id): serialize_feed_tweet(tweet, serialize) for tweet in tweets if tweet.id}
+    descriptions = media_descriptions(payload)
+    for tweet in unique.values():
+        for media in tweet.get("media", []):
+            if media.get("url") in descriptions:
+                media["altText"] = descriptions[media["url"]]
     next_cursor = next_cursor if next_cursor and next_cursor != cursor else None
     return {"tweets": list(unique.values()), "next_cursor": next_cursor, "has_more": bool(next_cursor)}
 

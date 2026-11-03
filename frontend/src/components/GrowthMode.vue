@@ -13,15 +13,8 @@ import {
 } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 
-import {
-  buildGrowthActionPayload,
-  buildRecommendationMetadata,
-  combinedGrowthButtonState,
-  formatDate,
-  formatMetric,
-  growthActionLabel,
-  normalizeRecommendations,
-} from "../lib/workbench";
+import { formatDate, formatMetric } from "../lib/format";
+import { buildGrowthActionPayload, buildRecommendationMetadata, combinedGrowthButtonState, growthActionLabel, normalizeRecommendations } from "../lib/social";
 
 const defaultQuery = "";
 const profileFocus = ref("Jovis.ai target customers: founders, RevOps, sales ops, support ops, and business teams trying to get answers from live business data without waiting on SQL, dashboards, or data teams");

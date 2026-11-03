@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isEnglishFeedPost, mergeFeedPage, safeMediaUrl, submitFeedAction } from "./feed";
+import { isEnglishFeedPost, mediaAltText, mergeFeedPage, safeMediaUrl, submitFeedAction } from "./feed";
 
 describe("English-only feed", () => {
   it("accepts English-labelled posts", () => {
@@ -74,6 +74,16 @@ describe("feed pagination", () => {
 });
 
 describe("feed media", () => {
+  it("uses author descriptions across supported media payloads", () => {
+    for (const key of ["altText", "alt_text", "ext_alt_text", "description"]) {
+      expect(mediaAltText({ [key]: "  A chart of monthly revenue  " })).toBe("A chart of monthly revenue");
+    }
+  });
+
+  it("labels undescribed images without inventing their contents", () => {
+    expect(mediaAltText({ altText: " ", alt_text: 42 }, 1)).toBe("Image 2. No description provided.");
+  });
+
   it("accepts HTTPS images and rejects unsafe or malformed URLs", () => {
     expect(safeMediaUrl("https://pbs.twimg.com/media/example.jpg")).toBe("https://pbs.twimg.com/media/example.jpg");
     for (const url of ["javascript:alert(1)", "data:image/svg+xml,bad", "http://example.com/image.jpg", "bad"]) expect(safeMediaUrl(url)).toBe("");
