@@ -309,3 +309,121 @@ def test_analysis_includes_response_fields_and_voice(monkeypatch):
     monkeypatch.setattr(prospects,"_run_codex",fake)
     monkeypatch.setattr(prospects,"voice_preferences",lambda:[])
     assert prospects.assess_posts([post()],snapshot()) == []
+
+
+def completed_run():
+    run = seed_run()
+    run.update(status="complete", stage="Finished", source_snapshot=snapshot())
+    for query in run["queries"]:
+        query["status"] = "searched"
+    run["posts"] = [prospects.rank_post(post(), assessment(), snapshot(), NOW)]
+    return run
+
+
+def test_progress_is_small_and_does_not_refresh_for_stage_only_changes():
+    run = completed_run()
+    initial = prospects.run_progress(run)
+    assert len(json.dumps(initial)) < 1500
+    assert "posts" not in initial and "source_snapshot" not in initial
+    run["stage"] = "A different progress message"
+    assert prospects.run_progress(run)["revision"] == initial["revision"]
+    run["posts"][0]["coverage"] = 50
+    assert prospects.run_progress(run)["revision"] != initial["revision"]
+
+
+def test_compact_report_excludes_detail_and_source_but_keeps_all_prospects():
+    run = completed_run()
+    run["posts"][0]["quote"] = "long statement " * 100
+    compact = prospects.compact_run(run)
+    assert len(compact["posts"]) == len(run["posts"])
+    assert "source_snapshot" not in compact and "requirements" not in compact["posts"][0]
+    assert len(compact["posts"][0]["quote_preview"]) == 180
+    assert len(run["posts"][0]["quote"]) > 180
+    assert compact["posts"][0]["coverage_checked"] is True
+
+
+def test_methodology_notes_do_not_force_partial_status():
+    run = completed_run()
+    run["status"] = "partial"  # An older saved report with unstructured warnings.
+    run["warnings"] = ["Coverage is qualitative, not search volume.", "No purchasing authority was verified."]
+    view = prospects.compact_run(run)
+    assert view["status"] == "complete"
+    assert len(view["notices"]["notes"]) == 1
+    assert len(view["notices"]["checks"]) == 1
+    assert not view["notices"]["issues"]
+    run["warnings"].append("X returned HTTP 403 Forbidden.")
+    assert prospects.compact_run(run)["status"] == "partial"
+    assert len(prospects.compact_run(run)["notices"]["issues"]) == 1
+
+
+def test_edited_drafts_survive_regeneration_and_remain_recoverable(isolated, monkeypatch):
+    run = completed_run()
+    run["posts"][0]["suggested_response"] = "Original generated reply"
+    prospects.save_run(run)
+    saved = prospects.save_draft(run["id"], post()["url"], "My personal edited reply")
+    assert saved["draft_text"] == "My personal edited reply"
+    monkeypatch.setattr(prospects, "voice_preferences", lambda: [])
+    monkeypatch.setattr(prospects, "_run_codex", lambda *a, **k: json.dumps({"suggested_response":"New generated reply", "response_note":"Check fit"}))
+    regenerated = prospects.suggest_response(run["id"], post()["url"])
+    assert regenerated["draft_text"] == "My personal edited reply"
+    assert regenerated["suggested_response"] == "New generated reply"
+    restored = prospects.get_prospect(run["id"], post()["url"])
+    assert restored["draft_text"] == "My personal edited reply"
+    texts = [v["text"] for v in prospects.draft_versions(run["id"], post()["url"])]
+    assert {"Original generated reply", "My personal edited reply", "New generated reply"}.issubset(texts)
+    prospects.save_draft(run["id"], post()["url"], "Original generated reply")
+    assert prospects.get_prospect(run["id"], post()["url"])["draft_text"] == "Original generated reply"
+
+
+def test_edits_made_while_model_is_running_are_not_overwritten(isolated, monkeypatch):
+    run = completed_run()
+    run["posts"][0]["suggested_response"] = "Original"
+    prospects.save_run(run)
+    monkeypatch.setattr(prospects, "voice_preferences", lambda: [])
+    def generate(*args, **kwargs):
+        prospects.save_draft(run["id"], post()["url"], "Edited while generating")
+        return json.dumps({"suggested_response":"New model suggestion", "response_note":""})
+    monkeypatch.setattr(prospects, "_run_codex", generate)
+    assert prospects.suggest_response(run["id"], post()["url"])["draft_text"] == "Edited while generating"
+
+
+def test_regeneration_replaces_unedited_generated_text_and_versions_it(isolated, monkeypatch):
+    run = completed_run()
+    run["posts"][0]["suggested_response"] = "Original"
+    prospects.save_run(run)
+    monkeypatch.setattr(prospects, "voice_preferences", lambda: [])
+    monkeypatch.setattr(prospects, "_run_codex", lambda *a, **k: json.dumps({"suggested_response":"Replacement", "response_note":""}))
+    result = prospects.suggest_response(run["id"], post()["url"])
+    assert result["draft_text"] == "Replacement"
+    assert {v["text"] for v in prospects.draft_versions(run["id"], post()["url"])} == {"Original", "Replacement"}
+
+
+def test_blank_draft_is_durable_and_research_saves_do_not_erase_it(isolated):
+    run = completed_run()
+    run["posts"][0]["suggested_response"] = "Original"
+    prospects.save_run(run)
+    prospects.save_draft(run["id"], post()["url"], "")
+    prospects.save_run(run)
+    assert prospects.get_prospect(run["id"], post()["url"])["draft_text"] == ""
+    assert any(v["text"] == "" for v in prospects.draft_versions(run["id"], post()["url"]))
+
+
+def test_compact_progress_detail_draft_and_history_endpoints(isolated):
+    from app import main
+    run = completed_run()
+    prospects.save_run(run)
+    client = TestClient(main.app)
+    response = client.get("/api/prospects/runs/latest?compact=true")
+    assert "source_snapshot" not in response.json()["run"]
+    assert "revision" in client.get(f"/api/prospects/runs/{run['id']}/progress").json()
+    detail = client.get(f"/api/prospects/runs/{run['id']}/prospect",params={"url":post()["url"]}).json()
+    assert detail["requirements"] and detail["code_evidence"] == snapshot()["evidence"]
+    research = client.get(f"/api/prospects/runs/{run['id']}/research").json()
+    assert research["source_snapshot"]["evidence_count"] == 1
+    assert "evidence" not in research["source_snapshot"]
+    url = f"/api/prospects/runs/{run['id']}/draft"
+    assert client.put(url,json={"url":post()["url"],"text":"Edited"}).json()["draft_text"] == "Edited"
+    assert client.put(url,json={"url":post()["url"],"text":None}).status_code == 422
+    assert client.put(url,json={"url":"https://x.com/unrelated/status/123","text":"Wrong prospect"}).status_code == 404
+    assert client.get(f"/api/prospects/runs/{run['id']}/versions",params={"url":post()["url"]}).json()["versions"]
+    assert client.get("/api/prospects/runs/missing/progress").status_code == 404

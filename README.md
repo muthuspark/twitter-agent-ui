@@ -71,6 +71,26 @@ npm --prefix frontend run build
 
 The first screen fetches real data with `twitter feed --max 20 --json` through the FastAPI backend.
 
+## Frontend structure
+
+- `App.vue` owns navigation and article deep links. Its view list defines the six
+  screens; screens load on first visit and retain their state through `KeepAlive`.
+- `components/Workbench.vue` owns command presets, execution and the existing
+  browser cache. `Feeds.vue` owns its timeline, thread and block list.
+- Each screen owns its requests and lifecycle. Feed paging and customer polling
+  stop when their screen is inactive. A draft operation can finish while another
+  screen is open without discarding the draft.
+- `style.css` owns shared colors, system typography, spacing and the three button
+  styles: `button`, `button button-primary`, `button button-quiet`. Component styles
+  cover layouts specific to that screen. Use monospace only for code.
+- `ReportTable.vue` renders analytics using captions, column headers and formatted
+  values. New reports are column definitions in `AnalyticsDashboard.vue`.
+
+Keep visible copy to task names, controls, data and actionable state. Use layout
+and ordering to explain the workflow. Put supporting evidence and configuration
+behind named disclosures; keep accessible labels even when their visible duplicate
+is removed. Preserve draft storage keys, API payloads and explicit publishing actions.
+
 ## Growth Mode
 
 Growth Mode discovers candidate posts with `twitter search`, sends the candidate list to Codex CLI for `like`, `comment`, or `skip` recommendations, and shows each recommendation for manual approval.
@@ -115,7 +135,7 @@ counterevidence. The research panel shows this selected set. If no sources quali
 or research is unavailable, the app explicitly falls back to the essay alone and
 does not invent current events.
 
-The form offers **Both post types**, **Latest projects**, or
+The form offers **All types**, **Projects**, or
 **Thought leadership**, plus draft count. Project posts examine
 actual recent projects, their mechanisms and limits for a solo operator. Thought
 leadership posts develop specific arguments, tradeoffs and implications within the
@@ -133,7 +153,7 @@ one main idea per sentence, common words, consistent technical terms and concret
 examples where useful. Drafts must retain accuracy, uncertainty and important nuance;
 clarity takes priority over brevity. This style overrides conflicting voice memory.
 
-The UI defaults to **Research around the essay**. Each research run gathers the past
+The UI uses essay-led research. Each research run gathers the past
 seven days of technology stories from Hacker News, recently created AI repositories
 from GitHub, and official OpenAI, Hugging Face and Google DeepMind publisher feeds.
 Drafts include validated source links, dates and available engagement counts. Hacker
@@ -142,9 +162,9 @@ announcements have no measured popularity. This is a curated source sample, not 
 ranking of the entire internet. Provider failures are reported and usable sources
 continue to work; a run with no recent sources fails without inventing replacements.
 Draft generation uses the signed-in Codex CLI and posting still requires
-manual approval. Select **My likes & bookmarks** for the personal interest mode below.
+manual approval. Interest-based research remains available to existing API clients.
 
-**Publishing:** Review and edit the final draft, then click **Approve and post**
+**Publishing:** Review and edit the final draft, then click **Post to X**
 to publish text through the Twitter CLI. Posts are text-only; image generation and
 attachments are not supported. Saved drafts from earlier versions still load,
 without their image controls or attachments.
@@ -165,10 +185,10 @@ approval before posting.
 
 ## Feeds
 
-The Feeds tab reads the authenticated account's actual For you home timeline.
+The **Feed** tab reads the authenticated account's actual For you home timeline.
 Scrolling near the bottom loads the next Twitter cursor page, with duplicate post
 IDs removed. Each post offers Like, Bookmark, and Open on X. Successful likes
-and bookmarks are recorded with source context for Post Ideas. Latest posts starts a fresh timeline. The loaded feed stays available
+and bookmarks are recorded with source context for Post Ideas. **Refresh** starts a fresh timeline. The loaded feed stays available
 when switching tabs. Photos load lazily; video links open the original post on X.
 
 The public `twitter feed` command drops pagination cursors, so
@@ -215,14 +235,14 @@ feed position. Escape closes the thread (or dismisses the text context menu firs
 
 ## Potential Customers
 
-The **Potential Customers** tab runs 20 problem-focused queries across public X,
+The **Customers** tab runs 20 problem-focused queries across public X,
 Reddit, LinkedIn and Hacker News using Codex live web research. It opens original
 posts, distinguishes personal pain from vendor promotion, and compares prospect
 requirements with the current local Jovis source. It never contacts people or
 publishes replies. X access is not required; inaccessible platforms and failed
 search groups appear as limitations rather than invented results.
 
-Click **Find potential customers**. The background run publishes partial results
+Click **Find customers**. The background run publishes partial results
 as each group of four queries completes. Refreshing or switching tabs reconnects
 to the latest run. Repeated clicks join the active run. Completed results persist
 in `backend/prospects.sqlite3`; an interrupted server run preserves completed
@@ -250,7 +270,9 @@ An unmet requirement is labeled supported, partial, not found in this inspection
 or unknown, with source references and next steps. MCP/plugin coverage must be
 verified separately. This is a targeted inspection, not a complete codebase audit.
 
-Confidence is a transparent ranking score, not purchase probability: personal pain
+The list defaults to **Best product fit**, shows ten prospects per page, and opens
+one review at a time. All prospects remain available through paging. **Conversation
+signal** (formerly confidence) is a transparent ranking score, not purchase probability: personal pain
 25 points, buyer-role evidence 20, product coverage 25, explicit solution request
 15, recency 10, original-post access 5. Partial coverage earns half credit; needs
 are equally weighted. Unknown dates, posts over 90 days old, snippet-only sources,
@@ -258,16 +280,62 @@ or missing personal pain cap the score at 59; uncertain buyers cap it at 49.
 Review original dates, community rules, product gaps and the actual conversation
 before introducing Jovis. No keyword search-volume claims are made.
 
+Source failures, checks before outreach, and methodology notes appear separately
+under **Research details**. Methodology notes alone do not make a completed run
+partial. Source inspection, full complaints and product gaps load when requested;
+the initial list uses `compact=true` API responses. While visible, the page polls
+a small `/progress` response and refreshes summaries only when results change.
+Polling pauses when the page is hidden or its tab is deactivated; research itself
+continues. Status announcements remain outside busy regions.
+
 ### Suggested responses
 
 New prospect analyses include a suggested public response in a concise solo-founder
 voice, guided by approved comment preferences when available. Existing saved
-prospects have a **Suggest response** button, so drafting does not rerun discovery.
+prospects have a **Suggest reply** button, so drafting does not rerun discovery.
 Replies answer the question first, disclose the founder relationship when mentioning
 Jovis, and use the saved product coverage to avoid unsupported promises. They must
 not invent personal experience, customer results, prices, or offers of free work.
 
-Generated responses are saved separately from research so background updates do
-not overwrite them. You can edit and copy a response, or regenerate it. Edits remain
-in the current tab; reloading restores the last generated version. Nothing is
-posted or sent by these controls.
+Generated responses and edited drafts are saved separately from research so
+background updates do not overwrite them. Edits autosave to SQLite and are kept
+in browser local storage until acknowledged, allowing recovery after refresh or
+a failed save. Saves are serialized per draft to prevent an older request from
+overwriting a newer edit. Inline status shows failures and offers retry.
+
+Regenerating an edited response keeps the user's draft and presents the generated
+suggestion separately. **Previous versions** preserves generated and edited text;
+restoring a version saves it without deleting other versions. Edits made while
+generation is running are preserved. Copying announces success in a live region.
+Nothing is posted or sent by these controls.
+
+## Article Reader
+
+Open **Articles**, paste an X/Twitter post link containing an article, and
+click **Open**. The reader uses the installed Twitter CLI's authenticated
+article client through an isolated Python bridge. It retains the raw rich content
+before the CLI's text parser discards embedded media. It displays the full article,
+cover and inline images in document order, author, publication date, reading time, and original
+source link. It does not generate or summarize the author's text. A missing full
+article produces an explicit error instead of substituting the post preview.
+
+**Print / Save PDF** opens the browser print dialog. The printed view contains the
+article and attribution, with app navigation and controls removed. Articles remain
+one continuous reading page on screen and paginate naturally on paper. Headings,
+lists, emphasis, code, tables and HTTPS images use print-aware styles. Printing waits
+for article images to load and reports failed images before opening the dialog. Article
+styles use a named print page so other app views retain their print settings.
+
+A successful load creates a reusable `?article=<encoded-X-post-URL>` app link.
+Reloading it opens the reader directly. Switching tabs keeps the loaded article;
+the browser title follows the article while the reader is active, providing a useful
+PDF filename. Loading a new article clears the old print target until the new
+content is available.
+
+Only HTTPS X/Twitter status links are accepted; queries and fragments are discarded
+and only the numeric post ID reaches the CLI. Original article media is accepted only
+from X's HTTPS image CDN. The server does not fetch arbitrary
+URLs. Markdown rendering disables raw HTML and rejects executable link schemes;
+the Markdown parser is loaded only with the reader tab. This feature requires an
+installed Twitter CLI version that supports the `article` command and access to
+the requested article through its current sign-in.

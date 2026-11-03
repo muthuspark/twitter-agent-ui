@@ -1,79 +1,197 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from "vue";
-import { AlertCircle, ExternalLink, Search } from "@lucide/vue";
+import {
+  computed,
+  nextTick,
+  onActivated,
+  onDeactivated,
+  onMounted,
+  onUnmounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
+import { ExternalLink, Search } from "@lucide/vue";
 import { formatDate } from "../lib/workbench";
+import {
+  clearRecovery,
+  draftKey,
+  readRecovery,
+  saveRecovery,
+  sortProspects,
+} from "../lib/prospects";
 
 const run = ref(null);
+const loading = ref(true);
 const starting = ref(false);
 const error = ref("");
+const notice = ref("");
+const copied = ref("");
 const filter = ref("all");
+const order = ref("fit");
+const page = ref(1);
+const pageSize = 10;
+const expanded = ref("");
+const reviewPageUrls = ref([]);
+const details = ref({});
+const detailLoading = ref({});
 const drafts = ref({});
+const saving = ref({});
+const saveErrors = ref({});
 const responseLoading = ref({});
 const responseErrors = ref({});
-const copied = ref("");
-let timer;
+const versions = ref({});
+const versionsLoading = ref({});
+const research = ref(null);
+const researchOpen = ref(false);
+const researchLoading = ref(false);
+const researchError = ref("");
+const resultsHeading = ref(null);
+let active = false;
 let disposed = false;
-const running = computed(() => starting.value || run.value?.status === "running");
-const searched = computed(() => run.value?.queries.filter(q => q.status === "searched").length || 0);
-const attempted = computed(() => run.value?.queries.filter(q => q.status !== "pending").length || 0);
-const posts = computed(() => (run.value?.posts || []).filter(post => filter.value !== "introduce" || post.recommendation === "Introduce Jovis"));
-const evidence = computed(() => Object.fromEntries((run.value?.source_snapshot?.evidence || []).map(item => [item.id, item])));
-const statusLabels = { supported: "Supported in code", partial: "Partly supported", not_found: "Not found in inspection", unknown: "Needs verification" };
-const sourceLabel = url => new URL(url).hostname.replace("www.", "");
-const replyKey = post => `${run.value.id}:${post.url}`;
-const responseText = post => drafts.value[replyKey(post)] ?? post.suggested_response ?? "";
-const hasResponse = post => Object.hasOwn(drafts.value, replyKey(post)) || Boolean(post.suggested_response);
+let timer;
+let pollController;
+let latestRequest = 0;
+const saveTimers = reactive(new Map());
+const saveRequests = new Map();
 
-async function generateResponse(post) {
-  const key = replyKey(post);
-  const runId = run.value.id;
-  if (responseLoading.value[key]) return;
-  responseLoading.value[key] = true;
-  responseErrors.value[key] = "";
-  try {
-    const reply = await request(`/api/prospects/runs/${runId}/response`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: post.url }),
-    });
-    if (!disposed && run.value?.id === runId) {
-      Object.assign(post, reply);
-      drafts.value[key] = reply.suggested_response;
-    }
-  } catch (failure) {
-    if (!disposed) responseErrors.value[key] = failure.message;
-  } finally {
-    responseLoading.value[key] = false;
-  }
-}
-
-async function copyResponse(post) {
-  const key = replyKey(post);
-  try {
-    await navigator.clipboard.writeText(responseText(post));
-    copied.value = key;
-    responseErrors.value[key] = "";
-  } catch {
-    responseErrors.value[key] = "Could not copy. Select the response and copy it manually.";
-  }
-}
+const running = computed(
+  () => starting.value || run.value?.status === "running",
+);
+const allPosts = computed(() => run.value?.posts || []);
+const sortedPosts = computed(() =>
+  sortProspects(
+    allPosts.value.filter(
+      (p) => filter.value !== "ready" || p.recommendation === "Introduce Jovis",
+    ),
+    order.value,
+  ),
+);
+const pageCount = computed(() =>
+  Math.max(1, Math.ceil(sortedPosts.value.length / pageSize)),
+);
+const visiblePosts = computed(() =>
+  expanded.value
+    ? reviewPageUrls.value
+        .map((url) => allPosts.value.find((post) => post.url === url))
+        .filter(Boolean)
+    : sortedPosts.value.slice(
+        (page.value - 1) * pageSize,
+        page.value * pageSize,
+      ),
+);
+const searched = computed(() => run.value?.searched || 0);
+const keyFor = (post) => draftKey(run.value.id, post.url);
+const detailFor = (post) => details.value[keyFor(post)];
+const textFor = (post) =>
+  drafts.value[keyFor(post)] ??
+  detailFor(post)?.draft_text ??
+  detailFor(post)?.suggested_response ??
+  "";
+const hasDraft = (post) =>
+  Object.hasOwn(drafts.value, keyFor(post)) ||
+  Boolean(detailFor(post)?.suggested_response) ||
+  typeof detailFor(post)?.draft_text === "string";
+const hasNewSuggestion = (post) =>
+  Boolean(
+    detailFor(post)?.suggested_response &&
+      textFor(post) !== detailFor(post).suggested_response,
+  );
+const postId = (post) => `prospect-${encodeURIComponent(post.url)}`;
+const sourceLabel = (url) => new URL(url).hostname.replace("www.", "");
+const postDate = (value) =>
+  value
+    ? new Intl.DateTimeFormat("en", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }).format(new Date(value))
+    : "Date unverified";
+const statusLabels = {
+  supported: "Supported in code",
+  partial: "Partly supported",
+  not_found: "Not found in inspection",
+  unknown: "Needs verification",
+};
+const noticeLabels = {
+  issues: "Source limitations",
+  checks: "Checks before outreach",
+  notes: "Methodology",
+};
 
 async function request(path, options) {
   const response = await fetch(path, options);
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.detail || "Could not load customer research.");
+  if (!response.ok)
+    throw new Error(
+      typeof body.detail === "string"
+        ? body.detail
+        : "Could not load customer research. Please retry.",
+    );
   return body;
+}
+
+function stopPolling() {
+  clearTimeout(timer);
+  pollController?.abort();
 }
 
 function schedulePoll() {
   clearTimeout(timer);
-  if (!disposed && run.value?.status === "running") timer = setTimeout(poll, 3000);
+  if (
+    active &&
+    !document.hidden &&
+    !disposed &&
+    run.value?.status === "running"
+  )
+    timer = setTimeout(poll, 3000);
+}
+
+function updateRun(next) {
+  if (run.value?.id !== next?.id) {
+    expanded.value = "";
+    page.value = 1;
+    research.value = null;
+    researchError.value = "";
+  } else if (run.value?.revision !== next?.revision) research.value = null;
+  run.value = next;
+  if (researchOpen.value && !research.value) loadResearch();
+}
+
+async function loadLatest() {
+  const serial = ++latestRequest;
+  try {
+    const body = await request("/api/prospects/runs/latest?compact=true");
+    if (!disposed && active && serial === latestRequest) {
+      updateRun(body.run);
+      error.value = "";
+    }
+  } catch (failure) {
+    if (!disposed && active) error.value = failure.message;
+  } finally {
+    if (!disposed) loading.value = false;
+    schedulePoll();
+  }
 }
 
 async function poll() {
+  if (!active || document.hidden || !run.value) return;
+  const runId = run.value.id;
+  pollController = new AbortController();
   try {
-    const next = await request(`/api/prospects/runs/${run.value.id}`);
-    if (!disposed) { run.value = next; error.value = ""; }
+    const progress = await request(`/api/prospects/runs/${runId}/progress`, {
+      signal: pollController.signal,
+    });
+    if (!active || run.value?.id !== runId) return;
+    if (progress.revision !== run.value.revision) {
+      const next = await request(`/api/prospects/runs/${runId}?compact=true`, {
+        signal: pollController.signal,
+      });
+      if (active && run.value?.id === runId) updateRun(next);
+    } else Object.assign(run.value, progress);
+    error.value = "";
   } catch (failure) {
-    if (!disposed) error.value = `${failure.message} Your research may still be running. Reconnecting…`;
+    if (failure.name !== "AbortError" && active)
+      error.value = `${failure.message} Research continues in the background.`;
   } finally {
     schedulePoll();
   }
@@ -83,184 +201,1127 @@ async function start() {
   if (running.value) return;
   starting.value = true;
   error.value = "";
+  ++latestRequest;
   try {
-    const next = await request("/api/prospects/runs", { method: "POST" });
-    if (!disposed) { run.value = next; filter.value = "all"; }
-    schedulePoll();
+    await flushAll();
+    const next = await request("/api/prospects/runs?compact=true", {
+      method: "POST",
+    });
+    if (!disposed) {
+      updateRun(next);
+      filter.value = "all";
+    }
   } catch (failure) {
-    if (!disposed) error.value = failure.message;
+    error.value = failure.message;
   } finally {
     starting.value = false;
+    schedulePoll();
   }
 }
 
-onMounted(async () => {
-  try {
-    const body = await request("/api/prospects/runs/latest");
-    if (!disposed) run.value = body.run;
-    schedulePoll();
-  } catch (failure) {
-    if (!disposed) error.value = failure.message;
+async function review(post) {
+  const key = keyFor(post);
+  if (expanded.value === post.url) {
+    await flushDraft(post);
+    expanded.value = "";
+    await nextTick();
+    if (!visiblePosts.value.some((item) => item.url === post.url))
+      resultsHeading.value?.focus();
+    return;
   }
+  reviewPageUrls.value = visiblePosts.value.map((item) => item.url);
+  expanded.value = post.url;
+  const runId = run.value.id;
+  detailLoading.value[key] = true;
+  responseErrors.value[key] = "";
+  try {
+    const body = await request(
+      `/api/prospects/runs/${runId}/prospect?url=${encodeURIComponent(post.url)}`,
+    );
+    if (disposed || run.value?.id !== runId) return;
+    details.value[key] = body;
+    const recovered = readRecovery(window.localStorage, key);
+    if (recovered !== null) {
+      drafts.value[key] = recovered;
+      await flushDraft(post);
+    }
+  } catch (failure) {
+    responseErrors.value[key] = failure.message;
+  } finally {
+    detailLoading.value[key] = false;
+  }
+}
+
+function edit(post, text) {
+  const key = keyFor(post);
+  drafts.value[key] = text;
+  copied.value = "";
+  saveErrors.value[key] = "";
+  notice.value = "";
+  try {
+    saveRecovery(window.localStorage, key, text);
+  } catch {
+    saveErrors.value[key] =
+      "Local recovery is unavailable. Keep this page open until the server save completes.";
+  }
+  clearTimeout(saveTimers.get(key));
+  saveTimers.set(
+    key,
+    setTimeout(() => flushDraft(post), 600),
+  );
+}
+
+async function flushDraft(post) {
+  if (!run.value) return;
+  const runId = run.value.id;
+  const key = keyFor(post);
+  clearTimeout(saveTimers.get(key));
+  saveTimers.delete(key);
+  while (saveRequests.has(key)) await saveRequests.get(key);
+  if (!Object.hasOwn(drafts.value, key)) return;
+  const text = drafts.value[key];
+  if (details.value[key]?.draft_text === text && !saveErrors.value[key]) {
+    try {
+      clearRecovery(window.localStorage, key, text);
+    } catch {
+      /* The server already has this text. */
+    }
+    return;
+  }
+  saving.value[key] = true;
+  const pending = (async () => {
+    try {
+      const reply = await request(`/api/prospects/runs/${runId}/draft`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: post.url, text }),
+      });
+      Object.assign(details.value[key] || (details.value[key] = {}), reply);
+      try {
+        clearRecovery(window.localStorage, key, text);
+      } catch {
+        /* The server copy is durable. */
+      }
+      saveErrors.value[key] = "";
+      if (versions.value[key]) await loadVersions(post);
+    } catch (failure) {
+      let recoverable = false;
+      try {
+        recoverable =
+          readRecovery(window.localStorage, key) === drafts.value[key];
+      } catch {
+        /* Storage may be blocked. */
+      }
+      saveErrors.value[key] =
+        `${failure.message} ${recoverable ? "Your browser recovery copy is kept. Retry saving before leaving this device." : "Keep this tab open; this edit is not saved yet. Copy it before leaving."}`;
+    } finally {
+      saving.value[key] = false;
+    }
+  })();
+  saveRequests.set(key, pending);
+  await pending;
+  if (saveRequests.get(key) === pending) saveRequests.delete(key);
+  if (run.value?.id === runId && drafts.value[key] !== text)
+    await flushDraft(post);
+}
+
+async function flushAll() {
+  await Promise.all(
+    allPosts.value
+      .filter((post) => Object.hasOwn(drafts.value, keyFor(post)))
+      .map(flushDraft),
+  );
+}
+
+async function generate(post) {
+  const key = keyFor(post);
+  const runId = run.value.id;
+  if (responseLoading.value[key]) return;
+  responseLoading.value[key] = true;
+  copied.value = "";
+  responseErrors.value[key] = "";
+  try {
+    await flushDraft(post);
+    if (saveErrors.value[key])
+      throw new Error(
+        "Save your edits before regenerating. Use Retry save below.",
+      );
+    const startingText = textFor(post);
+    const reply = await request(`/api/prospects/runs/${runId}/response`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: post.url }),
+    });
+    if (!disposed && run.value?.id === runId) {
+      const current = textFor(post);
+      const editedDuringGeneration = current !== startingText;
+      Object.assign(details.value[key], reply);
+      if (!editedDuringGeneration) drafts.value[key] = reply.draft_text;
+      if (versions.value[key]) await loadVersions(post);
+      post.has_response = true;
+      notice.value = `Response ready for ${post.title}. ${hasNewSuggestion(post) ? "Your edited draft is kept; review the new suggestion below." : "Review it before posting."}`;
+    }
+  } catch (failure) {
+    responseErrors.value[key] = failure.message;
+  } finally {
+    responseLoading.value[key] = false;
+  }
+}
+
+async function copy(post) {
+  try {
+    await navigator.clipboard.writeText(textFor(post));
+    copied.value = keyFor(post);
+    notice.value = `Response copied for ${post.title}.`;
+  } catch {
+    responseErrors.value[keyFor(post)] =
+      "Could not copy. Select the response and copy it manually.";
+  }
+}
+
+async function loadVersions(post) {
+  const key = keyFor(post);
+  versionsLoading.value[key] = true;
+  try {
+    versions.value[key] = (
+      await request(
+        `/api/prospects/runs/${run.value.id}/versions?url=${encodeURIComponent(post.url)}`,
+      )
+    ).versions;
+  } catch (failure) {
+    responseErrors.value[key] = failure.message;
+  } finally {
+    versionsLoading.value[key] = false;
+  }
+}
+
+async function restore(post, text) {
+  edit(post, text);
+  await flushDraft(post);
+  if (!saveErrors.value[keyFor(post)])
+    notice.value = `Draft restored for ${post.title}.`;
+}
+
+async function loadResearch() {
+  if (research.value || researchLoading.value || !run.value) return;
+  const runId = run.value.id;
+  researchLoading.value = true;
+  researchError.value = "";
+  try {
+    const body = await request(`/api/prospects/runs/${runId}/research`);
+    if (run.value?.id === runId) research.value = body;
+  } catch (failure) {
+    researchError.value = failure.message;
+  } finally {
+    researchLoading.value = false;
+    if (run.value?.id !== runId && researchOpen.value && !research.value)
+      loadResearch();
+  }
+}
+
+async function changePage(value) {
+  await flushAll();
+  page.value = Math.max(1, Math.min(pageCount.value, value));
+  expanded.value = "";
+  await nextTick();
+  resultsHeading.value?.focus({ preventScroll: true });
+  resultsHeading.value?.scrollIntoView({ block: "start" });
+}
+
+function activate() {
+  if (active) return;
+  active = true;
+  if (!document.hidden) loadLatest();
+}
+function deactivate() {
+  active = false;
+  ++latestRequest;
+  stopPolling();
+  flushAll();
+}
+function visibilityChanged() {
+  if (document.hidden) {
+    stopPolling();
+    flushAll();
+  } else if (active) loadLatest();
+}
+watch([filter, order], () => {
+  page.value = 1;
+  expanded.value = "";
+  flushAll();
+  notice.value = `${sortedPosts.value.length} conversations shown.`;
 });
-onUnmounted(() => { disposed = true; clearTimeout(timer); });
+watch(pageCount, (count) => {
+  if (page.value > count) page.value = count;
+});
+onMounted(() => {
+  document.addEventListener("visibilitychange", visibilityChanged);
+  activate();
+});
+onActivated(activate);
+onDeactivated(deactivate);
+onUnmounted(() => {
+  deactivate();
+  disposed = true;
+  document.removeEventListener("visibilitychange", visibilityChanged);
+  for (const t of saveTimers.values()) clearTimeout(t);
+});
 </script>
 
 <template>
-  <main class="manuscript-layout prospects-layout">
-    <aside class="manuscript-sidebar">
-      <div class="text-xs font-semibold uppercase text-muted">Customer research</div>
-      <p class="text-sm leading-6">Find people describing a problem Jovis can help solve. Check their needs against the current product code before starting a conversation.</p>
-      <button class="prospects-run" type="button" :disabled="running" @click="start">
-        <Search :size="16" aria-hidden="true" />
-        {{ running ? "Research in progress…" : run ? "Run analysis again" : "Find potential customers" }}
+  <main class="prospects-page" aria-labelledby="prospects-title">
+    <header class="prospects-heading">
+      <div><h2 id="prospects-title">Customers</h2></div>
+      <button
+        class="button button-primary"
+        type="button"
+        :disabled="running || loading"
+        @click="start"
+      >
+        <Search :size="16" aria-hidden="true" />{{
+          running ? "Searching…" : "Find customers"
+        }}
       </button>
-      <p class="mt-3 text-xs leading-5 text-muted">20 searches across public X, Reddit, LinkedIn and Hacker News posts. Results arrive in batches; a full pass can take 10–30 minutes. You can switch tabs and come back.</p>
-      <details v-if="run?.queries.length" class="prospects-queries">
-        <summary>20 search queries · {{ searched }} confirmed</summary>
-        <ol class="mt-3 grid gap-4">
-          <li v-for="(item, index) in run.queries" :key="item.query">
-            <span class="text-xs text-muted">{{ index + 1 }}. {{ item.theme }} · {{ item.status }}</span>
-            <p class="mt-1 text-sm">{{ item.query }}</p>
-            <p v-if="item.finding" class="mt-1 text-xs leading-5 text-muted">{{ item.finding }}</p>
-          </li>
-        </ol>
-      </details>
-    </aside>
+    </header>
+    <p v-if="error" role="alert" class="error-notice">
+      {{ error }}
+      <button type="button" class="button button-quiet" @click="loadLatest">
+        Retry connection
+      </button>
+    </p>
+    <!-- Announcements remain outside every busy region. -->
+    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {{ notice }}
+    </p>
+    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+      {{ running ? run?.stage : "" }}
+    </p>
+    <div v-if="run" class="research-status">
+      <p v-if="running">{{ run.stage }}</p>
+      <p v-else>
+        {{
+          run.status === "failed"
+            ? "Research could not finish"
+            : run.status === "interrupted"
+              ? "Research interrupted; completed results kept"
+              : "Research complete"
+        }}
+        <span class="muted"
+          >· {{ searched }}/{{ run.total_queries }} searches<span
+            class="status-date"
+          >
+            · {{ formatDate(run.completed_at || run.started_at) }}</span
+          ></span
+        >
+      </p>
+      <progress
+        v-if="running"
+        :value="run.attempted"
+        :max="run.total_queries"
+        aria-label="Search progress"
+      ></progress>
+      <p v-if="run.error" role="alert" class="error-text">{{ run.error }}</p>
+    </div>
 
-    <section class="manuscript-content" :aria-busy="running" aria-labelledby="prospects-title">
-      <div>
-        <h2 id="prospects-title" class="text-2xl font-bold">Potential customers</h2>
-        <p class="mt-2 text-sm leading-6 text-muted">Real complaints, an honest product fit, and a useful way to join the conversation.</p>
-      </div>
-      <p v-if="error" role="alert" class="prospects-notice text-danger"><AlertCircle :size="18" aria-hidden="true" />{{ error }}</p>
-      <div v-if="run" class="prospects-progress" role="status" aria-live="polite">
-        <div class="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <strong>{{ run.stage }}</strong>
-          <span class="text-muted">{{ run.status }}</span>
+    <section aria-labelledby="prospects-results-heading">
+      <div class="results-toolbar">
+        <h3 id="prospects-results-heading" ref="resultsHeading" tabindex="-1">
+          {{
+            loading
+              ? "Loading conversations…"
+              : `${sortedPosts.length} conversations`
+          }}
+        </h3>
+        <div class="result-controls">
+          <label
+            ><span class="sr-only">Show</span
+            ><select v-model="filter" aria-label="Show prospects">
+              <option value="all">All prospects</option>
+              <option value="ready">Ready to introduce</option>
+            </select></label
+          >
+          <label
+            ><span class="sr-only">Sort</span
+            ><select v-model="order" aria-label="Sort prospects">
+              <option value="fit">Best product fit</option>
+              <option value="signal">Conversation signal</option>
+              <option value="newest">Newest first</option>
+            </select></label
+          >
         </div>
-        <progress v-if="running" :value="attempted" max="20" class="mt-3 w-full" aria-label="Finished search attempts out of 20"></progress>
-        <p class="mt-2 text-xs text-muted">Started {{ formatDate(run.started_at) }}<template v-if="run.completed_at"> · Finished {{ formatDate(run.completed_at) }}</template></p>
-        <p v-if="run.error" role="alert" class="mt-3 text-sm text-danger">{{ run.error }}</p>
       </div>
-      <details v-if="run?.warnings.length" class="prospects-warnings">
-        <summary>{{ run.warnings.length }} research limitation{{ run.warnings.length === 1 ? '' : 's' }}</summary>
-        <ul class="mt-3 list-disc pl-5 text-sm leading-6"><li v-for="(warning, i) in run.warnings" :key="i">{{ warning }}</li></ul>
-      </details>
-      <details v-if="run?.source_snapshot" class="prospects-audit text-sm">
-        <summary>Jovis code inspection · {{ run.source_snapshot.evidence.length }} evidence excerpts</summary>
-        <p class="mt-3 leading-6 text-muted">{{ run.source_snapshot.scope }}</p>
-        <p class="mt-2 text-xs text-muted">Inspected {{ formatDate(run.source_snapshot.inspected_at) }} · Source fingerprint {{ run.source_snapshot.fingerprint.slice(0, 12) }}</p>
-        <p v-if="run.source_snapshot.semantic_searches?.length" class="mt-2 text-xs text-muted">{{ run.source_snapshot.semantic_searches.length }} complaint-specific searches across Jovis code.</p>
-        <p class="mt-3 leading-6">Connector files inspected: {{ run.source_snapshot.provider_files.join(', ') }}</p>
-      </details>
-
-      <div v-if="run?.posts.length" class="prospects-results-heading">
-        <p class="text-sm">{{ run.posts.length }} potential conversation{{ run.posts.length === 1 ? '' : 's' }} · ranked by confidence</p>
-        <label class="flex items-center gap-2 text-sm">
-          <span>Show</span>
-          <select v-model="filter" class="rounded-sm border border-rule-strong bg-paper px-2 py-2">
-            <option value="all">All prospects</option>
-            <option value="introduce">Ready to introduce</option>
-          </select>
-        </label>
+      <div v-if="loading" class="loading-state" aria-busy="true">
+        <p>Loading saved research…</p>
       </div>
-      <p v-if="run?.posts.length" class="text-xs leading-5 text-muted">Confidence is a rule-based research score, not a probability of purchase. It combines personal pain, buyer evidence, product coverage, solution requests, recency and source access. Dates need a live check before outreach.</p>
-
-      <article v-for="post in posts" :key="post.url" class="prospect-row">
-        <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
-          <span>{{ sourceLabel(post.url) }}<template v-if="post.author"> · {{ post.author }}</template></span>
-          <span class="prospect-confidence" :class="{ 'text-success': post.confidence >= 75 }">{{ post.confidence }}/100 confidence</span>
-        </div>
-        <h3 class="mt-3 text-lg font-bold leading-7"><a :href="post.url" target="_blank" rel="noopener noreferrer" class="prospect-link">{{ post.title }} <ExternalLink :size="15" class="inline" aria-hidden="true" /><span class="sr-only"> (opens in a new tab)</span></a></h3>
-        <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted">
-          <strong :class="post.recommendation === 'Introduce Jovis' ? 'text-success' : 'text-warning'">{{ post.recommendation }}</strong>
-          <span>{{ post.coverage }}% of identified needs supported</span>
-          <span>{{ post.evidence_kind === 'full_post' ? 'Original post inspected' : 'Search snippet only' }}</span>
-          <span>{{ post.published_at ? formatDate(post.published_at) : 'Date unverified' }}</span>
-        </div>
-        <blockquote class="prospect-quote">“{{ post.quote }}”</blockquote>
-        <p v-if="post.summary" class="text-sm leading-6">{{ post.summary }}</p>
-        <p v-if="post.date_note" class="mt-2 text-xs leading-5 text-muted">Date: {{ post.date_note }}</p>
-        <details class="mt-4 text-sm">
-          <summary class="font-semibold">Can Jovis solve this? <span v-if="post.requirements.length" class="font-normal text-muted">· {{ post.requirements.length }} needs checked</span></summary>
-          <p v-if="!post.requirements.length" class="mt-3 text-warning">Product coverage could not be assessed. Verify the prospect's needs before introducing Jovis.</p>
-          <ul class="prospect-requirements">
-            <li v-for="(item, i) in post.requirements" :key="i">
-              <div class="flex flex-wrap justify-between gap-2"><strong>{{ item.need }}</strong><span :class="item.status === 'supported' ? 'text-success' : 'text-warning'">{{ statusLabels[item.status] }}</span></div>
-              <p class="mt-1 leading-6 text-muted">{{ item.explanation }}</p>
-              <p v-if="item.next_step" class="mt-1 leading-6"><strong>Next:</strong> {{ item.next_step }}</p>
-              <details v-for="id in item.evidence_ids" :key="id" class="mt-2 text-xs text-muted">
-                <summary>Code evidence: {{ evidence[id]?.path }}:{{ evidence[id]?.line }}</summary>
-                <pre class="prospect-code">{{ evidence[id]?.excerpt }}</pre>
-              </details>
-            </li>
-          </ul>
-        </details>
-        <div v-if="post.introduction_angle" class="mt-4 text-sm leading-6"><strong>Conversation angle</strong><p class="mt-1">{{ post.introduction_angle }}</p></div>
-        <p v-if="post.next_action" class="mt-3 text-sm leading-6"><strong>Next step:</strong> {{ post.next_action }}</p>
-        <div class="prospect-response">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <h4 class="text-sm font-semibold">Suggested response</h4>
-            <button class="response-button" type="button" :disabled="responseLoading[replyKey(post)]" @click="generateResponse(post)">
-              {{ responseLoading[replyKey(post)] ? 'Writing response…' : hasResponse(post) ? 'Regenerate response' : 'Suggest response' }}
+      <article
+        v-for="post in visiblePosts"
+        :key="post.url"
+        class="prospect-row"
+        :aria-labelledby="`${postId(post)}-title`"
+      >
+        <div class="prospect-summary">
+          <div class="prospect-main">
+            <p class="prospect-meta">
+              {{ sourceLabel(post.url)
+              }}<template v-if="post.author"> · {{ post.author }}</template> ·
+              {{ postDate(post.published_at) }}
+            </p>
+            <h4 :id="`${postId(post)}-title`" class="prospect-title">
+              <a :href="post.url" target="_blank" rel="noopener noreferrer"
+                >{{ post.title }}
+                <ExternalLink
+                  :size="14"
+                  class="inline"
+                  aria-hidden="true"
+                /><span class="sr-only"> (opens in a new tab)</span></a
+              >
+            </h4>
+            <p v-if="expanded !== post.url" class="quote-preview">
+              {{ post.quote_preview }}
+            </p>
+          </div>
+          <div class="prospect-actions">
+            <p class="fit-metric">
+              {{
+                post.coverage_checked
+                  ? `${post.coverage}% product fit`
+                  : "Fit unverified"
+              }}
+            </p>
+            <p class="signal-metric">
+              Conversation signal {{ post.confidence }}/100
+            </p>
+            <button
+              :id="`${postId(post)}-review`"
+              class="button"
+              type="button"
+              :aria-expanded="expanded === post.url"
+              :aria-controls="`${postId(post)}-detail`"
+              :aria-label="`${expanded === post.url ? 'Close review of' : 'Review and reply to'} ${post.title}`"
+              @click="review(post)"
+            >
+              {{ expanded === post.url ? "Close review" : "Review & reply" }}
             </button>
           </div>
-          <p v-if="responseLoading[replyKey(post)]" role="status" class="mt-2 text-xs text-muted">Writing a useful reply in your solo founder voice. This may take a few minutes.</p>
-          <template v-if="hasResponse(post)">
-            <textarea class="response-draft mt-3" :aria-label="`Response to ${post.title}`" :value="responseText(post)" rows="5" @input="drafts[replyKey(post)] = $event.target.value; copied = ''"></textarea>
-            <div class="mt-2 flex flex-wrap items-center justify-between gap-3">
-              <p class="text-xs text-muted">Review and edit before posting. Edits stay in this tab.</p>
-              <button class="response-button" type="button" :disabled="!responseText(post).trim()" @click="copyResponse(post)">{{ copied === replyKey(post) ? 'Copied' : 'Copy response' }}</button>
+        </div>
+        <div
+          v-if="expanded === post.url"
+          :id="`${postId(post)}-detail`"
+          class="prospect-detail"
+        >
+          <p v-if="detailLoading[keyFor(post)]" role="status">
+            Loading this conversation…
+          </p>
+          <template v-else-if="detailFor(post)">
+            <p class="recommendation">
+              {{ post.recommendation }}
+              <span
+                v-if="detailFor(post).evidence_kind !== 'full_post'"
+                class="muted"
+                >· Search snippet only</span
+              >
+            </p>
+            <blockquote>
+              {{ detailFor(post).quote?.replace(/^>\s*/, "") }}
+            </blockquote>
+            <p>{{ detailFor(post).summary }}</p>
+            <p v-if="detailFor(post).date_note" class="muted">
+              Date check: {{ detailFor(post).date_note }}
+            </p>
+            <details class="fit-details">
+              <summary>
+                Product fit and gaps ·
+                {{ detailFor(post).requirements.length }} needs checked
+              </summary>
+              <p v-if="!detailFor(post).requirements.length">
+                Coverage has not been assessed. Verify the needs before
+                introducing Jovis.
+              </p>
+              <ul class="requirements">
+                <li v-for="(need, i) in detailFor(post).requirements" :key="i">
+                  <div class="need-heading">
+                    <strong>{{ need.need }}</strong
+                    ><span
+                      :class="
+                        need.status === 'supported'
+                          ? 'supported'
+                          : 'needs-check'
+                      "
+                      >{{ statusLabels[need.status] }}</span
+                    >
+                  </div>
+                  <p>{{ need.explanation }}</p>
+                  <p v-if="need.next_step">
+                    <strong>Next:</strong> {{ need.next_step }}
+                  </p>
+                  <details
+                    v-for="id in need.evidence_ids"
+                    :key="id"
+                    class="code-evidence"
+                  >
+                    <summary>
+                      Code evidence:
+                      {{
+                        detailFor(post).code_evidence.find((e) => e.id === id)
+                          ?.path
+                      }}:{{
+                        detailFor(post).code_evidence.find((e) => e.id === id)
+                          ?.line
+                      }}
+                    </summary>
+                    <pre>{{
+                      detailFor(post).code_evidence.find((e) => e.id === id)
+                        ?.excerpt
+                    }}</pre>
+                  </details>
+                </li>
+              </ul>
+            </details>
+            <p v-if="detailFor(post).next_action">
+              <strong>Next step:</strong> {{ detailFor(post).next_action }}
+            </p>
+            <div class="response-editor">
+              <div class="editor-heading">
+                <h5>Reply</h5>
+                <button
+                  class="button"
+                  type="button"
+                  :disabled="responseLoading[keyFor(post)]"
+                  :aria-label="`${hasDraft(post) ? 'Regenerate response to' : 'Suggest a response to'} ${post.title}`"
+                  @click="generate(post)"
+                >
+                  {{
+                    responseLoading[keyFor(post)]
+                      ? "Writing response…"
+                      : hasDraft(post)
+                        ? "Regenerate"
+                        : "Suggest reply"
+                  }}
+                </button>
+              </div>
+              <p v-if="responseLoading[keyFor(post)]" role="status">
+                Writing a useful reply. Your edits will be kept.
+              </p>
+              <template v-if="hasDraft(post)">
+                <label class="sr-only" :for="`${postId(post)}-draft`"
+                  >Your reply</label
+                >
+                <textarea
+                  :id="`${postId(post)}-draft`"
+                  :value="textFor(post)"
+                  :aria-label="`Your reply to ${post.title}`"
+                  rows="6"
+                  @input="edit(post, $event.target.value)"
+                  @blur="flushDraft(post)"
+                ></textarea>
+                <div class="editor-footer">
+                  <p
+                    class="save-state"
+                    :class="{ 'error-text': saveErrors[keyFor(post)] }"
+                    :role="saveErrors[keyFor(post)] ? 'alert' : undefined"
+                  >
+                    {{
+                      saving[keyFor(post)] || saveTimers.has(keyFor(post))
+                        ? "Saving draft…"
+                        : saveErrors[keyFor(post)]
+                          ? saveErrors[keyFor(post)]
+                          : "Saved"
+                    }}
+                  </p>
+                  <button
+                    class="button"
+                    type="button"
+                    :disabled="!textFor(post).trim()"
+                    :aria-label="`${copied === keyFor(post) ? 'Response copied for' : 'Copy response to'} ${post.title}`"
+                    @click="copy(post)"
+                  >
+                    {{ copied === keyFor(post) ? "Copied" : "Copy" }}
+                  </button>
+                </div>
+                <button
+                  v-if="saveErrors[keyFor(post)]"
+                  class="button button-quiet"
+                  type="button"
+                  @click="flushDraft(post)"
+                >
+                  Retry save
+                </button>
+                <details v-if="hasNewSuggestion(post)" class="new-suggestion">
+                  <summary>
+                    Generated suggestion; your edited draft is kept
+                  </summary>
+                  <p>{{ detailFor(post).suggested_response }}</p>
+                  <button
+                    class="button"
+                    type="button"
+                    :aria-label="`Use the generated suggestion for ${post.title}`"
+                    @click="restore(post, detailFor(post).suggested_response)"
+                  >
+                    Use suggestion
+                  </button>
+                </details>
+                <p v-if="detailFor(post).response_note" class="needs-check">
+                  Before posting: {{ detailFor(post).response_note }}
+                </p>
+                <details
+                  class="draft-history"
+                  @toggle="$event.target.open && loadVersions(post)"
+                >
+                  <summary>Previous versions</summary>
+                  <p v-if="versionsLoading[keyFor(post)]">Loading versions…</p>
+                  <ul v-else class="versions">
+                    <li
+                      v-for="version in versions[keyFor(post)] || []"
+                      :key="version.id"
+                    >
+                      <p class="muted">
+                        {{ formatDate(version.saved_at) }} · {{ version.kind }}
+                      </p>
+                      <p>{{ version.text || "(Empty draft)" }}</p>
+                      <button
+                        class="button button-quiet"
+                        type="button"
+                        :disabled="version.text === textFor(post)"
+                        :aria-label="`Restore response version ${version.id} for ${post.title}`"
+                        @click="restore(post, version.text)"
+                      >
+                        Restore this version
+                      </button>
+                    </li>
+                  </ul>
+                  <p
+                    v-if="
+                      !versionsLoading[keyFor(post)] &&
+                      !versions[keyFor(post)]?.length
+                    "
+                  >
+                    Versions will appear as you edit or regenerate.
+                  </p>
+                </details>
+              </template>
             </div>
-            <p v-if="post.response_note" class="mt-2 text-xs leading-5 text-warning">Before posting: {{ post.response_note }}</p>
+            <details>
+              <summary>Conversation signal breakdown</summary>
+              <dl class="score-factors">
+                <div
+                  v-for="(points, name) in detailFor(post).confidence_factors"
+                  :key="name"
+                >
+                  <dt>{{ name }}</dt>
+                  <dd>{{ points }} points</dd>
+                </div>
+              </dl>
+            </details>
+            <details v-if="detailFor(post).caveats?.length">
+              <summary>Checks for this conversation</summary>
+              <ul class="caveats">
+                <li v-for="(item, i) in detailFor(post).caveats" :key="i">
+                  {{ item }}
+                </li>
+              </ul>
+            </details>
           </template>
-          <p v-else-if="!responseLoading[replyKey(post)]" class="mt-2 text-xs leading-5 text-muted">Answer their question first. Mention Jovis where it fits, with an honest founder disclosure.</p>
-          <p v-if="responseErrors[replyKey(post)]" role="alert" class="mt-2 text-sm text-danger">{{ responseErrors[replyKey(post)] }}</p>
+          <p
+            v-if="responseErrors[keyFor(post)]"
+            role="alert"
+            class="error-text"
+          >
+            {{ responseErrors[keyFor(post)] }}
+            <button
+              v-if="!detailFor(post)"
+              class="button button-quiet"
+              type="button"
+              @click="
+                expanded = '';
+                review(post);
+              "
+            >
+              Retry loading
+            </button>
+          </p>
         </div>
-        <ul v-if="post.caveats.length" class="mt-3 list-disc pl-5 text-xs leading-5 text-muted"><li v-for="(caveat, i) in post.caveats" :key="i">{{ caveat }}</li></ul>
-        <details class="mt-4 text-xs text-muted">
-          <summary>Why this confidence score?</summary>
-          <dl class="mt-3 grid gap-2"><div v-for="(points, label) in post.confidence_factors" :key="label" class="flex max-w-sm justify-between gap-4"><dt>{{ label }}</dt><dd>{{ points }} points</dd></div></dl>
-          <p class="mt-2 leading-5">Unverified dates, older posts and snippet-only sources cap confidence at 59. Uncertain buyers and general discussions cap it at 49. Requirements are weighted equally; partial support receives half credit.</p>
-        </details>
       </article>
-      <div v-if="!posts.length" class="manuscript-empty">
-        <div>
-          <p class="font-semibold">{{ running ? 'Looking for useful conversations' : run?.posts.length ? 'No prospects are ready for an introduction yet' : run ? 'No qualified conversations found' : 'Start with people who already have the problem' }}</p>
-          <p class="mt-2 text-sm leading-6 text-muted">{{ running ? 'Results appear as each search group completes. Each prospect is checked against Jovis code.' : run?.posts.length ? 'Choose All prospects to review product gaps and research leads.' : run ? 'Review search coverage and limitations above, then run a fresh analysis. Results are never filled with invented leads.' : 'Run the analysis to search 20 problem-focused queries, inspect original posts, and compare each person’s needs with Jovis.' }}</p>
-        </div>
+      <div v-if="!loading && !visiblePosts.length" class="empty-state">
+        <h4>
+          {{
+            running
+              ? "Looking for useful conversations"
+              : allPosts.length
+                ? "No prospects are ready for an introduction yet"
+                : run
+                  ? "No qualified conversations found"
+                  : "No conversations yet"
+          }}
+        </h4>
       </div>
+      <nav
+        v-if="pageCount > 1"
+        class="pagination"
+        aria-label="Prospect result pages"
+      >
+        <button
+          class="button"
+          type="button"
+          :disabled="page === 1"
+          @click="changePage(page - 1)"
+        >
+          Previous
+        </button>
+        <p aria-live="polite">
+          {{ (page - 1) * pageSize + 1 }}–{{
+            Math.min(page * pageSize, sortedPosts.length)
+          }}
+          of {{ sortedPosts.length }}
+        </p>
+        <button
+          class="button"
+          type="button"
+          :disabled="page === pageCount"
+          @click="changePage(page + 1)"
+        >
+          Next
+        </button>
+      </nav>
     </section>
+
+    <details
+      v-if="run"
+      :open="researchOpen"
+      class="research-details"
+      @toggle="
+        researchOpen = $event.target.open;
+        researchOpen && loadResearch();
+      "
+    >
+      <summary>
+        Research details<span v-if="run.notices.issues.length" class="muted">
+          · {{ run.notices.issues.length }} limitations</span
+        >
+      </summary>
+      <p v-if="researchLoading">Loading research details…</p>
+      <p v-if="researchError" role="alert" class="error-text">
+        {{ researchError }}
+        <button class="button button-quiet" type="button" @click="loadResearch">
+          Retry research details
+        </button>
+      </p>
+      <template v-if="research">
+        <section v-for="(items, group) in research.notices" :key="group">
+          <h4 v-if="items.length">{{ noticeLabels[group] }}</h4>
+          <ul v-if="items.length" class="caveats">
+            <li v-for="(item, i) in items" :key="i">{{ item }}</li>
+          </ul>
+        </section>
+        <details>
+          <summary>20 search queries · {{ searched }} confirmed</summary>
+          <ol class="queries">
+            <li v-for="(item, i) in research.queries" :key="item.query">
+              <strong>{{ i + 1 }}. {{ item.query }}</strong>
+              <p class="muted">{{ item.theme }} · {{ item.status }}</p>
+              <p>{{ item.finding }}</p>
+            </li>
+          </ol>
+        </details>
+        <details v-if="research.source_snapshot.fingerprint">
+          <summary>
+            Jovis code inspection ·
+            {{ research.source_snapshot.evidence_count }} excerpts
+          </summary>
+          <p>{{ research.source_snapshot.scope }}</p>
+          <p class="muted">
+            Inspected {{ formatDate(research.source_snapshot.inspected_at) }} ·
+            {{
+              research.source_snapshot.semantic_search_count
+            }}
+            complaint-specific searches
+          </p>
+          <p class="muted">
+            Source fingerprint
+            {{ research.source_snapshot.fingerprint.slice(0, 12) }}
+          </p>
+          <p>
+            Connector files:
+            {{ research.source_snapshot.provider_files?.join(", ") }}
+          </p>
+        </details>
+        <details>
+          <summary>How ranking works</summary>
+          <p>
+            Product fit is the share of identified needs supported in code, with
+            half credit for partial support. It does not prove deployment
+            readiness. Conversation signal combines personal pain (25), buyer
+            evidence (20), product coverage (25), asking for a solution (15),
+            recency (10), and source access (5). Unverified dates, older posts
+            and snippet-only sources cap the signal at 59. Uncertain buyers cap
+            it at 49. Neither score predicts purchase.
+          </p>
+        </details>
+        <p class="muted">
+          Research runs 20 public searches across X, Reddit, LinkedIn and Hacker
+          News. A full pass can take 10–30 minutes. Nothing is posted or sent.
+        </p>
+      </template>
+    </details>
   </main>
 </template>
 
 <style scoped>
-.prospects-run { display: flex; align-items: center; justify-content: center; gap: .5rem; width: 100%; margin-top: 1.5rem; min-height: 2.75rem; padding: .6rem .8rem; border-radius: 2px; background: var(--ink); color: var(--paper); font-size: .875rem; font-weight: 600; }
-.prospects-run:hover { background: var(--ink-hover); }
-.prospects-run:disabled { opacity: .55; }
-.prospects-queries { margin-top: 2rem; border-top: 1px solid var(--rule); padding-top: 1rem; }
-summary { cursor: pointer; padding-block: .5rem; overflow-wrap: anywhere; }
-.prospects-queries summary { font-size: .8125rem; }
-.prospects-notice { display: flex; align-items: start; gap: .75rem; border: 1px solid var(--danger-rule); background: var(--danger-wash); padding: 1rem; font-size: .875rem; }
-.prospects-notice svg { flex-shrink: 0; }
-.prospects-progress { border-block: 1px solid var(--rule); padding-block: 1rem; }
-progress { accent-color: var(--accent); height: .5rem; }
-.prospects-warnings { padding: .5rem 1rem; background: var(--warning-wash); border: 1px solid var(--warning-rule); color: var(--warning); font-size: .875rem; }
-.prospects-audit { border-bottom: 1px solid var(--rule); padding-bottom: .75rem; overflow-wrap: anywhere; }
-.prospects-results-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-.prospect-row { border-top: 1px solid var(--rule-strong); padding-block: 1.5rem .5rem; overflow-wrap: anywhere; }
-.prospect-row p, .prospect-quote { max-width: 75ch; }
-.prospect-confidence { font-weight: 700; white-space: nowrap; }
-.prospect-link { text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--rule-strong); }
-.prospect-link:hover { color: var(--accent); text-decoration-color: currentColor; }
-.prospect-quote { padding: 1rem; margin-block: 1rem; background: var(--paper-shade); font-size: .875rem; line-height: 1.75; }
-.prospect-requirements { display: grid; gap: 1rem; margin-top: .75rem; }
-.prospect-requirements > li { border-top: 1px solid var(--rule); padding-top: .75rem; }
-.prospect-code { max-height: 18rem; overflow: auto; margin-top: .5rem; padding: .75rem; background: var(--paper-shade); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.prospect-response { margin-top: 1.25rem; border-top: 1px solid var(--rule); padding-top: 1rem; }
-.response-button { border: 1px solid var(--rule-strong); border-radius: 2px; padding: .5rem .75rem; font-size: .75rem; background: var(--paper); }
-.response-button:hover { background: var(--paper-shade); }
-.response-button:disabled { opacity: .55; }
-.response-draft { border: 1px solid var(--rule-strong); border-radius: 2px; background: var(--paper); padding: .75rem; font-size: .875rem; line-height: 1.75; }
+.prospects-page {
+  font-size: 1rem;
+  line-height: 1.6;
+  padding-block: 1.5rem 3rem;
+  color: var(--ink);
+}
+.prospects-heading,
+.results-toolbar,
+.result-controls,
+.editor-heading,
+.editor-footer,
+.need-heading,
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.prospects-heading {
+  align-items: start;
+  margin-bottom: 1rem;
+}
+.prospects-heading h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.muted,
+.prospect-meta,
+.signal-metric,
+.save-state {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.research-status {
+  padding-block: 0.25rem 0.8rem;
+  font-size: 0.875rem;
+}
+.research-status progress {
+  display: block;
+  width: 100%;
+  height: 0.5rem;
+  margin-top: 0.6rem;
+  accent-color: var(--accent);
+}
+.results-toolbar {
+  border-top: 1px solid var(--rule);
+  padding-top: 1rem;
+}
+.results-toolbar h3 {
+  font-size: 1rem;
+  font-weight: 650;
+}
+.result-controls {
+  gap: 1rem;
+}
+.result-controls label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+select {
+  min-height: 44px;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.875rem;
+  width: auto;
+  border: 1px solid var(--rule-strong);
+  background: var(--paper);
+}
+.prospect-row {
+  border-top: 1px solid var(--rule);
+  padding-block: 1.15rem;
+  overflow-wrap: anywhere;
+}
+.prospect-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1.5rem;
+  align-items: start;
+}
+.prospect-main {
+  min-width: 0;
+}
+.prospect-meta {
+  margin-bottom: 0.35rem;
+}
+.prospect-title {
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  font-weight: 600;
+}
+.prospect-title a {
+  text-decoration: underline;
+  text-decoration-color: var(--rule-strong);
+  text-underline-offset: 3px;
+}
+.prospect-title a:hover {
+  color: var(--accent);
+}
+.quote-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 75ch;
+  margin-top: 0.5rem;
+  font-size: 0.9375rem;
+  color: var(--muted);
+}
+.prospect-actions {
+  display: grid;
+  gap: 0.2rem;
+  justify-items: end;
+}
+.fit-metric {
+  font-size: 1rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.signal-metric {
+  white-space: nowrap;
+}
+.prospect-actions button {
+  margin-top: 0.4rem;
+}
+.prospect-detail {
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--rule);
+  padding-top: 1rem;
+}
+.prospect-detail > p,
+.prospect-detail blockquote {
+  max-width: 75ch;
+  margin-bottom: 0.8rem;
+}
+.recommendation {
+  font-weight: 600;
+}
+blockquote {
+  padding: 0.85rem 1rem;
+  background: var(--paper-shade);
+  border-radius: 3px;
+}
+summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding-block: 0.65rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+details > p {
+  max-width: 75ch;
+  margin-block: 0.5rem;
+}
+.requirements {
+  display: grid;
+  gap: 1rem;
+  margin-block: 0.5rem 1rem;
+}
+.requirements > li {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--rule);
+}
+.requirements p {
+  margin-top: 0.4rem;
+  max-width: 75ch;
+}
+.need-heading {
+  align-items: start;
+}
+.supported {
+  color: var(--success);
+}
+.needs-check {
+  color: var(--warning);
+}
+.code-evidence {
+  font-size: 0.875rem;
+}
+pre {
+  max-height: 20rem;
+  overflow: auto;
+  padding: 1rem;
+  background: var(--paper-shade);
+  font-family: ui-monospace, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.response-editor {
+  margin-block: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+.editor-heading h5 {
+  font-size: 1rem;
+  font-weight: 650;
+}
+textarea {
+  width: 100%;
+  padding: 0.8rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  background: var(--paper);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+.editor-footer {
+  margin-block: 0.5rem;
+}
+.save-state {
+  max-width: 65ch;
+}
+.new-suggestion {
+  margin-block: 1rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--rule-strong);
+}
+.versions {
+  display: grid;
+  gap: 1rem;
+}
+.versions li {
+  border-top: 1px solid var(--rule);
+  padding-top: 0.75rem;
+}
+.versions li > p {
+  max-width: 75ch;
+  white-space: pre-wrap;
+}
+.score-factors {
+  max-width: 32rem;
+}
+.score-factors > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.25rem;
+}
+.caveats {
+  list-style: disc;
+  padding-left: 1.3rem;
+}
+.caveats li {
+  margin-block: 0.5rem;
+  max-width: 75ch;
+}
+.error-notice {
+  border: 1px solid var(--danger-rule);
+  padding: 0.75rem 1rem;
+  background: var(--danger-wash);
+  margin-bottom: 1rem;
+}
+.error-text,
+.error-notice {
+  color: var(--danger);
+}
+.empty-state,
+.loading-state {
+  border-block: 1px solid var(--rule);
+  padding-block: 2rem;
+}
+.empty-state h4 {
+  font-weight: 600;
+}
+.empty-state p {
+  margin-top: 0.5rem;
+  max-width: 65ch;
+}
+.pagination {
+  justify-content: center;
+  padding-block: 1rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.875rem;
+}
+.research-details {
+  border-top: 1px solid var(--rule);
+  margin-top: 1.5rem;
+  padding-top: 0.5rem;
+}
+.research-details > section h4 {
+  font-weight: 650;
+  margin-top: 1rem;
+}
+.queries {
+  display: grid;
+  gap: 1rem;
+  margin-block: 1rem;
+}
+@media (max-width: 639px) {
+  .prospects-page {
+    padding-top: 1rem;
+  }
+  .prospects-heading {
+    gap: 0.6rem;
+  }
+  .prospects-heading h2 {
+    font-size: 1.5rem;
+  }
+  .status-date {
+    display: none;
+  }
+  .prospects-heading > div {
+    width: 100%;
+  }
+  .results-toolbar {
+    gap: 0.5rem;
+  }
+  .result-controls {
+    width: 100%;
+    gap: 0.5rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .result-controls label {
+    display: grid;
+    gap: 0.2rem;
+  }
+  .result-controls select {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 0.4rem;
+  }
+  .prospect-summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.6rem;
+  }
+  .prospect-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.75rem;
+  }
+  .fit-metric {
+    font-size: 0.9375rem;
+  }
+  .signal-metric {
+    font-size: 0.875rem;
+  }
+  .prospect-actions button {
+    margin-top: 0;
+  }
+  .editor-heading,
+  .editor-footer {
+    align-items: start;
+  }
+  .research-status {
+    padding-bottom: 0.5rem;
+  }
+}
 </style>

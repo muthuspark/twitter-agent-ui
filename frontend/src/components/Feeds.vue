@@ -1,13 +1,47 @@
 <script setup>
-import { AlertCircle, ArrowUp, Ban, Bookmark, ExternalLink, Heart, MessageSquare, RefreshCw, Repeat2, X } from "@lucide/vue";
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from "vue";
+import {
+  AlertCircle,
+  ArrowUp,
+  Ban,
+  Bookmark,
+  ExternalLink,
+  Heart,
+  MessageSquare,
+  RefreshCw,
+  Repeat2,
+  X,
+} from "@lucide/vue";
+import {
+  computed,
+  nextTick,
+  onActivated,
+  onBeforeUnmount,
+  onDeactivated,
+  ref,
+  watch,
+} from "vue";
 import { formatDate, formatMetric, tweetUrl } from "../lib/workbench";
-import { isEnglishFeedPost, mergeFeedPage, safeMediaUrl, submitFeedAction } from "../lib/feed";
-import { addBlockedTerm, createFeedBlockMatcher, loadBlockedTerms, normalizeBlockedTerm, saveBlockedTerms } from "../lib/blocklist";
+import {
+  isEnglishFeedPost,
+  mergeFeedPage,
+  safeMediaUrl,
+  submitFeedAction,
+} from "../lib/feed";
+import {
+  addBlockedTerm,
+  createFeedBlockMatcher,
+  loadBlockedTerms,
+  normalizeBlockedTerm,
+  saveBlockedTerms,
+} from "../lib/blocklist";
 import FeedThread from "./FeedThread.vue";
 
-const props = defineProps({ blockListOpen: { type: Boolean, default: false } });
-const emit = defineEmits(["block-list-count"]);
+const blockListOpen = ref(false);
+
+async function toggleBlockList() {
+  if (!blockListOpen.value) await closeThread();
+  blockListOpen.value = !blockListOpen.value;
+}
 
 const tweets = ref([]);
 const cursor = ref(null);
@@ -25,12 +59,20 @@ const selectedPost = ref(null);
 let savedFeedScroll = 0;
 let threadOpenTimer;
 let storage;
-try { storage = window.localStorage; } catch { storage = null; }
+try {
+  storage = window.localStorage;
+} catch {
+  storage = null;
+}
 const blockedTerms = ref(loadBlockedTerms(storage));
 const blockMatcher = computed(() => createFeedBlockMatcher(blockedTerms.value));
 const englishTweets = computed(() => tweets.value.filter(isEnglishFeedPost));
-const visibleTweets = computed(() => englishTweets.value.filter((tweet) => !blockMatcher.value(tweet)));
-const hiddenCount = computed(() => englishTweets.value.length - visibleTweets.value.length);
+const visibleTweets = computed(() =>
+  englishTweets.value.filter((tweet) => !blockMatcher.value(tweet)),
+);
+const hiddenCount = computed(
+  () => englishTweets.value.length - visibleTweets.value.length,
+);
 const newBlockedTerm = ref("");
 const blockNotice = ref("");
 const blockError = ref("");
@@ -46,21 +88,36 @@ let observer;
 let controller;
 
 async function openThread(tweet) {
-  if (!isEnglishFeedPost(tweet) || blockMatcher.value(tweet) || String(selectedPost.value?.id) === String(tweet.id)) return;
+  if (
+    !isEnglishFeedPost(tweet) ||
+    blockMatcher.value(tweet) ||
+    String(selectedPost.value?.id) === String(tweet.id)
+  )
+    return;
   savedFeedScroll = window.scrollY;
   selectedPost.value = tweet;
   closeContextMenu();
   await nextTick();
   if (window.matchMedia("(max-width: 1099px)").matches) {
-    const top = document.getElementById("feed-top").getBoundingClientRect().top + window.scrollY;
+    const top =
+      document.getElementById("feed-top").getBoundingClientRect().top +
+      window.scrollY;
     window.scrollTo({ top, behavior: "instant" });
   }
-  document.getElementById("feed-thread-heading")?.focus({ preventScroll: true });
+  document
+    .getElementById("feed-thread-heading")
+    ?.focus({ preventScroll: true });
 }
 
 function handlePostClick(tweet, event) {
   window.clearTimeout(threadOpenTimer);
-  if (event.button !== 0 || event.detail > 1 || event.target.closest("button, a, input, textarea") || window.getSelection()?.toString().trim()) return;
+  if (
+    event.button !== 0 ||
+    event.detail > 1 ||
+    event.target.closest("button, a, input, textarea") ||
+    window.getSelection()?.toString().trim()
+  )
+    return;
   // Let a double-click or drag finish selecting text before opening a column.
   threadOpenTimer = window.setTimeout(() => {
     if (!window.getSelection()?.toString().trim()) openThread(tweet);
@@ -73,13 +130,18 @@ async function closeThread() {
   selectedPost.value = null;
   await nextTick();
   window.scrollTo({ top: savedFeedScroll, behavior: "instant" });
-  document.querySelector(`[data-post-id="${CSS.escape(String(id))}"] [data-thread-toggle]`)?.focus({ preventScroll: true });
+  document
+    .querySelector(
+      `[data-post-id="${CSS.escape(String(id))}"] [data-thread-toggle]`,
+    )
+    ?.focus({ preventScroll: true });
 }
 
 function persistBlockList(terms) {
   blockedTerms.value = terms;
   blockError.value = saveBlockedTerms(storage, terms)
-    ? "" : "Changes apply for this session, but browser storage is unavailable. They may be lost on refresh.";
+    ? ""
+    : "Changes apply for this session, but browser storage is unavailable. They may be lost on refresh.";
 }
 
 function blockText(value) {
@@ -89,15 +151,20 @@ function blockText(value) {
     const term = normalizeBlockedTerm(value);
     const alreadyBlocked = terms.length === blockedTerms.value.length;
     persistBlockList(terms);
-    blockNotice.value = alreadyBlocked ? `“${term}” is already blocked.` : `“${term}” added to your block list.`;
+    blockNotice.value = alreadyBlocked
+      ? `“${term}” is already blocked.`
+      : `“${term}” added to your block list.`;
     newBlockedTerm.value = "";
     closeContextMenu();
     window.getSelection()?.removeAllRanges();
     selectedText.value = null;
-    if (fromSelection) nextTick(() => {
-      const target = document.getElementById("feed-block-list-toggle") || document.getElementById("feed-thread-heading");
-      target?.focus({ preventScroll: true });
-    });
+    if (fromSelection)
+      nextTick(() => {
+        const target =
+          document.getElementById("feed-block-list-toggle") ||
+          document.getElementById("feed-thread-heading");
+        target?.focus({ preventScroll: true });
+      });
   } catch (failure) {
     blockError.value = failure.message;
   }
@@ -111,12 +178,21 @@ function unblockText(term) {
 function getSelectedFeedText() {
   const selection = window.getSelection();
   if (!selection?.rangeCount || selection.isCollapsed) return null;
-  const anchor = selection.anchorNode?.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection.anchorNode?.parentElement;
+  const anchor =
+    selection.anchorNode?.nodeType === Node.ELEMENT_NODE
+      ? selection.anchorNode
+      : selection.anchorNode?.parentElement;
   const root = anchor?.closest("[data-feed-text]");
-  if (!root?.closest("#feed-top") || !root.contains(selection.focusNode)) return null;
+  if (!root?.closest("#feed-top") || !root.contains(selection.focusNode))
+    return null;
   const text = normalizeBlockedTerm(selection.toString());
   if (!text || text.length > 200) return null;
-  return { text, root, postId: root.closest(".feed-post")?.dataset.postId, rect: selection.getRangeAt(0).getBoundingClientRect() };
+  return {
+    text,
+    root,
+    postId: root.closest(".feed-post")?.dataset.postId,
+    rect: selection.getRangeAt(0).getBoundingClientRect(),
+  };
 }
 
 function updateSelection() {
@@ -132,8 +208,14 @@ async function showSelectionMenu(info, x, y) {
   const rect = menuElement.value.getBoundingClientRect();
   contextMenu.value = {
     text: info.text,
-    x: Math.max(8, Math.min(x, document.documentElement.clientWidth - rect.width - 8)),
-    y: Math.max(8, Math.min(y, document.documentElement.clientHeight - rect.height - 8)),
+    x: Math.max(
+      8,
+      Math.min(x, document.documentElement.clientWidth - rect.width - 8),
+    ),
+    y: Math.max(
+      8,
+      Math.min(y, document.documentElement.clientHeight - rect.height - 8),
+    ),
   };
   menuButton.value?.focus({ preventScroll: true });
 }
@@ -143,12 +225,19 @@ function openSelectionMenu(event) {
   const info = getSelectedFeedText();
   if (!info || !info.root.contains(event.target)) return;
   event.preventDefault();
-  showSelectionMenu(info, event.clientX || info.rect.left, event.clientY || info.rect.bottom);
+  showSelectionMenu(
+    info,
+    event.clientX || info.rect.left,
+    event.clientY || info.rect.bottom,
+  );
 }
 
-function closeContextMenu() { contextMenu.value = null; }
+function closeContextMenu() {
+  contextMenu.value = null;
+}
 function dismissOnPointer(event) {
-  if (contextMenu.value && !menuElement.value?.contains(event.target)) closeContextMenu();
+  if (contextMenu.value && !menuElement.value?.contains(event.target))
+    closeContextMenu();
 }
 function handleMenuKey(event) {
   if (contextMenu.value && ["Escape", "Tab"].includes(event.key)) {
@@ -172,13 +261,17 @@ function handleMenuKey(event) {
   }
 }
 
-watch(blockedTerms, (terms) => {
-  emit("block-list-count", terms.length);
-  emptyPages = 0;
-  autoPaused.value = false;
-  if (selectedPost.value && blockMatcher.value(selectedPost.value)) closeThread();
-  observeEnd();
-}, { immediate: true });
+watch(
+  blockedTerms,
+  (terms) => {
+    emptyPages = 0;
+    autoPaused.value = false;
+    if (selectedPost.value && blockMatcher.value(selectedPost.value))
+      closeThread();
+    observeEnd();
+  },
+  { immediate: true },
+);
 
 async function actOnPost(tweet, action) {
   const id = String(tweet.id);
@@ -199,7 +292,13 @@ async function actOnPost(tweet, action) {
 async function observeEnd() {
   await nextTick();
   observer?.disconnect();
-  if (active && hasMore.value && !error.value && !autoPaused.value && sentinel.value) {
+  if (
+    active &&
+    hasMore.value &&
+    !error.value &&
+    !autoPaused.value &&
+    sentinel.value
+  ) {
     observer?.observe(sentinel.value);
   }
 }
@@ -219,18 +318,33 @@ async function loadMore({ refresh = false, manual = false } = {}) {
   try {
     const params = new URLSearchParams({ limit: "20" });
     if (requestedCursor) params.set("cursor", requestedCursor);
-    const response = await fetch(`/api/feed?${params}`, { signal: controller.signal });
+    const response = await fetch(`/api/feed?${params}`, {
+      signal: controller.signal,
+    });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.detail || "Unable to load your Twitter feed.");
-    if (!Array.isArray(body.tweets)) throw new Error("Twitter returned an invalid feed page.");
+    if (!response.ok)
+      throw new Error(body.detail || "Unable to load your Twitter feed.");
+    if (!Array.isArray(body.tweets))
+      throw new Error("Twitter returned an invalid feed page.");
     const visited = refresh ? new Set() : visitedCursors;
-    const merged = mergeFeedPage(refresh ? [] : tweets.value, body, requestedCursor, visited);
+    const merged = mergeFeedPage(
+      refresh ? [] : tweets.value,
+      body,
+      requestedCursor,
+      visited,
+    );
     visited.add(requestedCursor);
     visitedCursors = visited;
     tweets.value = merged.tweets;
     cursor.value = merged.nextCursor;
     hasMore.value = merged.hasMore;
-    const visibleAdded = merged.added ? merged.tweets.slice(-merged.added).filter((tweet) => isEnglishFeedPost(tweet) && !blockMatcher.value(tweet)).length : 0;
+    const visibleAdded = merged.added
+      ? merged.tweets
+          .slice(-merged.added)
+          .filter(
+            (tweet) => isEnglishFeedPost(tweet) && !blockMatcher.value(tweet),
+          ).length
+      : 0;
     emptyPages = visibleAdded ? 0 : emptyPages + 1;
     autoPaused.value = emptyPages >= 3;
   } catch (failure) {
@@ -249,9 +363,19 @@ onActivated(() => {
   window.addEventListener("scroll", closeContextMenu, true);
   window.addEventListener("resize", closeContextMenu);
   if ("IntersectionObserver" in window) {
-    observer = new IntersectionObserver((entries) => {
-      if (active && !error.value && !autoPaused.value && entries.some((entry) => entry.isIntersecting) && !loading.value) loadMore();
-    }, { rootMargin: "600px 0px" });
+    observer = new IntersectionObserver(
+      (entries) => {
+        if (
+          active &&
+          !error.value &&
+          !autoPaused.value &&
+          entries.some((entry) => entry.isIntersecting) &&
+          !loading.value
+        )
+          loadMore();
+      },
+      { rootMargin: "600px 0px" },
+    );
   }
   if (!tweets.value.length && !loading.value && !error.value) loadMore();
   else observeEnd();
@@ -272,156 +396,415 @@ function stop() {
 }
 onDeactivated(stop);
 onBeforeUnmount(stop);
-defineExpose({ closeThread });
 </script>
 
 <template>
-  <main id="feed-top" class="feeds-view" :class="{ 'has-thread': selectedPost }" @contextmenu="openSelectionMenu">
+  <main
+    id="feed-top"
+    class="feeds-view"
+    :class="{ 'has-thread': selectedPost }"
+    @contextmenu="openSelectionMenu"
+  >
     <div class="feed-columns">
-    <div class="feed-timeline-column">
-    <header class="feeds-heading">
-      <h2 class="text-2xl font-bold">Feeds</h2>
-      <button
-        type="button"
-        class="inline-flex min-h-11 items-center gap-2 border border-rule-strong px-3 text-sm hover:bg-paper-shade disabled:opacity-55"
-        :disabled="loading"
-        @click="loadMore({ refresh: true })"
-      >
-        <RefreshCw :size="15" :class="{ 'animate-spin': loading }" aria-hidden="true" />
-        Latest posts
-      </button>
-    </header>
-
-    <section v-if="props.blockListOpen" id="feed-block-list" class="feed-block-list" aria-labelledby="feed-block-heading">
-      <h3 id="feed-block-heading" class="font-bold">Blocked words and phrases</h3>
-      <p class="mt-2 text-sm text-muted">Whole words and phrases, ignoring case. Matches in posts and quoted text are hidden. Saved in this browser.</p>
-      <form class="mt-4 flex flex-wrap items-end gap-3" @submit.prevent="blockText(newBlockedTerm)">
-        <label class="grid min-w-0 flex-1 gap-2 text-sm" for="new-blocked-term">
-          Add a word or phrase
-          <input id="new-blocked-term" v-model="newBlockedTerm" maxlength="200" placeholder="e.g. Anant Ambani" class="min-h-11 border border-rule-strong bg-paper px-3" />
-        </label>
-        <button type="submit" class="min-h-11 bg-ink px-4 text-sm text-paper disabled:opacity-55" :disabled="!newBlockedTerm.trim()">Block</button>
-      </form>
-      <ul v-if="blockedTerms.length" class="mt-4 flex flex-wrap gap-2" aria-label="Blocked text">
-        <li v-for="term in blockedTerms" :key="term" class="inline-flex max-w-full items-center gap-3 border border-rule px-3 text-sm">
-          <span class="min-w-0 break-words">{{ term }}</span>
-          <button type="button" class="inline-flex min-h-11 shrink-0 items-center gap-1 text-muted hover:text-ink" :aria-label="`Unblock ${term}`" @click="unblockText(term)"><X :size="14" aria-hidden="true" /> Remove</button>
-        </li>
-      </ul>
-      <p v-else class="mt-4 text-sm text-muted">Nothing blocked yet. Select text in a post and right-click to block it, or add a phrase above.</p>
-    </section>
-    <p v-if="blockError" class="mt-4 text-sm text-danger" role="alert">{{ blockError }}</p>
-    <p v-if="blockNotice" class="mt-4 text-sm" role="status">{{ blockNotice }}</p>
-    <p v-if="blockedTerms.length" class="my-4 text-xs text-muted">{{ hiddenCount }} loaded {{ hiddenCount === 1 ? 'post' : 'posts' }} hidden by your block list.</p>
-
-    <div v-if="error" class="my-6 flex items-start gap-3 border border-danger-rule bg-danger-wash p-4 text-sm text-danger" role="alert">
-      <AlertCircle :size="18" class="shrink-0" aria-hidden="true" />
-      <div>
-        <p>{{ error }}</p>
-        <button class="mt-2 min-h-11 underline underline-offset-4" type="button" @click="loadMore({ manual: true, refresh: retryRefresh })">Try again</button>
-      </div>
-    </div>
-
-    <section aria-label="Home timeline" :aria-busy="loading">
-      <article v-for="tweet in visibleTweets" :key="tweet.id" class="feed-post feed-clickable-post" :class="{ 'is-thread-selected': String(selectedPost?.id) === String(tweet.id) }" :data-post-id="tweet.id" @click="handlePostClick(tweet, $event)">
-        <p v-if="tweet.isRetweet && tweet.retweetedBy" class="mb-3 flex items-center gap-2 text-xs text-muted">
-          <Repeat2 :size="14" aria-hidden="true" /> {{ tweet.retweetedBy }} reposted
-        </p>
-        <header class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <strong>{{ tweet.author?.name || tweet.author?.screenName || 'Unknown author' }}</strong>
-          <span v-if="tweet.author?.screenName" class="text-sm text-muted">@{{ tweet.author.screenName }}</span>
-          <time :datetime="tweet.createdAtISO || undefined" class="text-xs text-muted">{{ formatDate(tweet.createdAtISO || tweet.createdAtLocal) }}</time>
+      <div class="feed-timeline-column">
+        <header class="feeds-heading">
+          <h2 class="text-2xl font-bold">Feed</h2>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              id="feed-block-list-toggle"
+              class="button"
+              type="button"
+              :aria-expanded="blockListOpen"
+              aria-controls="feed-block-list"
+              @click="toggleBlockList"
+            >
+              Block list<span v-if="blockedTerms.length">
+                ({{ blockedTerms.length }})</span
+              >
+            </button>
+            <button
+              type="button"
+              class="button"
+              :disabled="loading"
+              @click="loadMore({ refresh: true })"
+            >
+              <RefreshCw
+                :size="15"
+                :class="{ 'animate-spin': loading }"
+                aria-hidden="true"
+              />
+              Refresh
+            </button>
+          </div>
         </header>
-        <p data-feed-text tabindex="-1" class="mt-3 whitespace-pre-wrap text-sm leading-6">{{ tweet.text }}</p>
 
-        <blockquote v-if="tweet.quotedTweet" class="mt-4 border border-rule p-4 text-sm">
-          <strong>{{ tweet.quotedTweet.author?.name || tweet.quotedTweet.author?.screenName }}</strong>
-          <p data-feed-text tabindex="-1" class="mt-2 whitespace-pre-wrap leading-6">{{ tweet.quotedTweet.text }}</p>
-        </blockquote>
+        <section
+          v-if="blockListOpen"
+          id="feed-block-list"
+          class="feed-block-list"
+          aria-labelledby="feed-block-heading"
+        >
+          <h3 id="feed-block-heading" class="font-bold">
+            Blocked words and phrases
+          </h3>
+          <form
+            class="mt-4 flex flex-wrap items-end gap-3"
+            @submit.prevent="blockText(newBlockedTerm)"
+          >
+            <label
+              class="grid min-w-0 flex-1 gap-2 text-sm"
+              for="new-blocked-term"
+            >
+              Word or phrase
+              <input
+                id="new-blocked-term"
+                v-model="newBlockedTerm"
+                maxlength="200"
+                                class="min-h-11 border border-rule-strong bg-paper px-3"
+              />
+            </label>
+            <button
+              type="submit"
+              class="button button-primary"
+              :disabled="!newBlockedTerm.trim()"
+            >
+              Block
+            </button>
+          </form>
+          <ul
+            v-if="blockedTerms.length"
+            class="mt-4 flex flex-wrap gap-2"
+            aria-label="Blocked text"
+          >
+            <li
+              v-for="term in blockedTerms"
+              :key="term"
+              class="inline-flex max-w-full items-center gap-3 border border-rule px-3 text-sm"
+            >
+              <span class="min-w-0 break-words">{{ term }}</span>
+              <button
+                type="button"
+                class="inline-flex min-h-11 shrink-0 items-center gap-1 text-muted hover:text-ink"
+                :aria-label="`Unblock ${term}`"
+                @click="unblockText(term)"
+              >
+                <X :size="14" aria-hidden="true" /> Remove
+              </button>
+            </li>
+          </ul>
+          <p v-else class="mt-4 text-sm text-muted">No blocked phrases</p>
+        </section>
+        <p v-if="blockError" class="mt-4 text-sm text-danger" role="alert">
+          {{ blockError }}
+        </p>
+        <p v-if="blockNotice" class="mt-4 text-sm" role="status">
+          {{ blockNotice }}
+        </p>
+        <p v-if="blockedTerms.length" class="my-4 text-xs text-muted">
+          {{ hiddenCount }} loaded
+          {{ hiddenCount === 1 ? "post" : "posts" }} hidden by your block list.
+        </p>
 
-        <div v-if="tweet.media?.length" class="feed-media mt-4">
-          <template v-for="(media, index) in tweet.media" :key="`${tweet.id}-${index}`">
-            <img
-              v-if="media.type === 'photo' && safeMediaUrl(media.url)"
-              :src="safeMediaUrl(media.url)"
-              :width="media.width || undefined"
-              :height="media.height || undefined"
-              alt="Photo attached to the post"
-              loading="lazy"
-              decoding="async"
-              referrerpolicy="no-referrer"
-            />
-            <a v-else :href="tweetUrl(tweet)" target="_blank" rel="noreferrer" class="inline-flex min-h-11 items-center gap-2 text-sm underline underline-offset-4">
-              View {{ media.type === 'video' ? 'video' : 'media' }} on X <ExternalLink :size="14" aria-hidden="true" />
-            </a>
-          </template>
+        <div
+          v-if="error"
+          class="my-6 flex items-start gap-3 border border-danger-rule bg-danger-wash p-4 text-sm text-danger"
+          role="alert"
+        >
+          <AlertCircle :size="18" class="shrink-0" aria-hidden="true" />
+          <div>
+            <p>{{ error }}</p>
+            <button
+              class="mt-2 min-h-11 underline underline-offset-4"
+              type="button"
+              @click="loadMore({ manual: true, refresh: retryRefresh })"
+            >
+              Try again
+            </button>
+          </div>
         </div>
 
-        <footer class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted">
-          <span>{{ formatMetric(tweet.metrics?.likes) }} likes</span>
-          <span>{{ formatMetric(tweet.metrics?.retweets) }} reposts</span>
-          <span>{{ formatMetric(tweet.metrics?.replies) }} replies</span>
-        </footer>
-        <div class="mt-3 flex flex-wrap items-center gap-2">
-          <button data-thread-toggle type="button" class="inline-flex min-h-11 items-center gap-2 border border-rule-strong px-3 text-sm hover:bg-paper-shade" :aria-expanded="String(selectedPost?.id) === String(tweet.id)" aria-controls="feed-thread" @click.stop="openThread(tweet)"><MessageSquare :size="15" aria-hidden="true" /> View thread</button>
-          <button
-            type="button"
-            class="inline-flex min-h-11 items-center gap-2 border border-rule-strong px-3 text-sm hover:bg-paper-shade disabled:cursor-not-allowed disabled:opacity-60"
-            :class="{ 'text-accent': likedIds.has(String(tweet.id)) }"
-            :disabled="Boolean(pendingActions[tweet.id]) || likedIds.has(String(tweet.id))"
-            :aria-pressed="likedIds.has(String(tweet.id))"
-            @click="actOnPost(tweet, 'like')"
+        <section aria-label="Home timeline" :aria-busy="loading">
+          <article
+            v-for="tweet in visibleTweets"
+            :key="tweet.id"
+            class="feed-post feed-clickable-post"
+            :class="{
+              'is-thread-selected':
+                String(selectedPost?.id) === String(tweet.id),
+            }"
+            :data-post-id="tweet.id"
+            @click="handlePostClick(tweet, $event)"
           >
-            <Heart :size="15" :fill="likedIds.has(String(tweet.id)) ? 'currentColor' : 'none'" aria-hidden="true" />
-            {{ likedIds.has(String(tweet.id)) ? 'Liked' : pendingActions[tweet.id] === 'like' ? 'Liking…' : 'Like' }}
-          </button>
-          <button
-            type="button"
-            class="inline-flex min-h-11 items-center gap-2 border border-rule-strong px-3 text-sm hover:bg-paper-shade disabled:cursor-not-allowed disabled:opacity-60"
-            :class="{ 'text-accent': bookmarkedIds.has(String(tweet.id)) }"
-            :disabled="Boolean(pendingActions[tweet.id]) || bookmarkedIds.has(String(tweet.id))"
-            :aria-pressed="bookmarkedIds.has(String(tweet.id))"
-            @click="actOnPost(tweet, 'bookmark')"
-          >
-            <Bookmark :size="15" :fill="bookmarkedIds.has(String(tweet.id)) ? 'currentColor' : 'none'" aria-hidden="true" />
-            {{ bookmarkedIds.has(String(tweet.id)) ? 'Bookmarked' : pendingActions[tweet.id] === 'bookmark' ? 'Saving…' : 'Bookmark' }}
-          </button>
-          <a :href="tweetUrl(tweet)" target="_blank" rel="noreferrer" class="inline-flex min-h-11 items-center gap-2 border border-rule-strong px-3 text-sm hover:bg-paper-shade">
-            Open on X <ExternalLink :size="14" aria-hidden="true" />
-          </a>
-          <button v-if="selectedText?.postId === String(tweet.id)" type="button" class="inline-flex min-h-11 max-w-full items-center gap-2 border border-rule-strong px-3 text-sm hover:bg-paper-shade" @pointerdown.prevent @click="blockText(selectedText.text)">
-            <Ban :size="15" class="shrink-0" aria-hidden="true" /><span class="truncate">Block “{{ selectedText.text }}”</span>
-          </button>
+            <p
+              v-if="tweet.isRetweet && tweet.retweetedBy"
+              class="mb-3 flex items-center gap-2 text-xs text-muted"
+            >
+              <Repeat2 :size="14" aria-hidden="true" />
+              {{ tweet.retweetedBy }} reposted
+            </p>
+            <header class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <strong>{{
+                tweet.author?.name ||
+                tweet.author?.screenName ||
+                "Unknown author"
+              }}</strong>
+              <span v-if="tweet.author?.screenName" class="text-sm text-muted"
+                >@{{ tweet.author.screenName }}</span
+              >
+              <time
+                :datetime="tweet.createdAtISO || undefined"
+                class="text-xs text-muted"
+                >{{
+                  formatDate(tweet.createdAtISO || tweet.createdAtLocal)
+                }}</time
+              >
+            </header>
+            <p
+              data-feed-text
+              tabindex="-1"
+              class="mt-3 whitespace-pre-wrap text-sm leading-6"
+            >
+              {{ tweet.text }}
+            </p>
+
+            <blockquote
+              v-if="tweet.quotedTweet"
+              class="mt-4 border border-rule p-4 text-sm"
+            >
+              <strong>{{
+                tweet.quotedTweet.author?.name ||
+                tweet.quotedTweet.author?.screenName
+              }}</strong>
+              <p
+                data-feed-text
+                tabindex="-1"
+                class="mt-2 whitespace-pre-wrap leading-6"
+              >
+                {{ tweet.quotedTweet.text }}
+              </p>
+            </blockquote>
+
+            <div v-if="tweet.media?.length" class="feed-media mt-4">
+              <template
+                v-for="(media, index) in tweet.media"
+                :key="`${tweet.id}-${index}`"
+              >
+                <img
+                  v-if="media.type === 'photo' && safeMediaUrl(media.url)"
+                  :src="safeMediaUrl(media.url)"
+                  :width="media.width || undefined"
+                  :height="media.height || undefined"
+                  alt="Photo attached to the post"
+                  loading="lazy"
+                  decoding="async"
+                  referrerpolicy="no-referrer"
+                />
+                <a
+                  v-else
+                  :href="tweetUrl(tweet)"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="inline-flex min-h-11 items-center gap-2 text-sm underline underline-offset-4"
+                >
+                  View {{ media.type === "video" ? "video" : "media" }} on X
+                  <ExternalLink :size="14" aria-hidden="true" />
+                </a>
+              </template>
+            </div>
+
+            <footer
+              class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted"
+            >
+              <span>{{ formatMetric(tweet.metrics?.likes) }} likes</span>
+              <span>{{ formatMetric(tweet.metrics?.retweets) }} reposts</span>
+              <span>{{ formatMetric(tweet.metrics?.replies) }} replies</span>
+            </footer>
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                data-thread-toggle
+                type="button"
+                class="button"
+                :aria-expanded="String(selectedPost?.id) === String(tweet.id)"
+                aria-controls="feed-thread"
+                @click.stop="openThread(tweet)"
+              >
+                <MessageSquare :size="15" aria-hidden="true" /> View thread
+              </button>
+              <button
+                type="button"
+                class="button"
+                :class="{ 'text-accent': likedIds.has(String(tweet.id)) }"
+                :disabled="
+                  Boolean(pendingActions[tweet.id]) ||
+                  likedIds.has(String(tweet.id))
+                "
+                :aria-pressed="likedIds.has(String(tweet.id))"
+                @click="actOnPost(tweet, 'like')"
+              >
+                <Heart
+                  :size="15"
+                  :fill="
+                    likedIds.has(String(tweet.id)) ? 'currentColor' : 'none'
+                  "
+                  aria-hidden="true"
+                />
+                {{
+                  likedIds.has(String(tweet.id))
+                    ? "Liked"
+                    : pendingActions[tweet.id] === "like"
+                      ? "Liking…"
+                      : "Like"
+                }}
+              </button>
+              <button
+                type="button"
+                class="button"
+                :class="{ 'text-accent': bookmarkedIds.has(String(tweet.id)) }"
+                :disabled="
+                  Boolean(pendingActions[tweet.id]) ||
+                  bookmarkedIds.has(String(tweet.id))
+                "
+                :aria-pressed="bookmarkedIds.has(String(tweet.id))"
+                @click="actOnPost(tweet, 'bookmark')"
+              >
+                <Bookmark
+                  :size="15"
+                  :fill="
+                    bookmarkedIds.has(String(tweet.id))
+                      ? 'currentColor'
+                      : 'none'
+                  "
+                  aria-hidden="true"
+                />
+                {{
+                  bookmarkedIds.has(String(tweet.id))
+                    ? "Bookmarked"
+                    : pendingActions[tweet.id] === "bookmark"
+                      ? "Saving…"
+                      : "Bookmark"
+                }}
+              </button>
+              <a
+                :href="tweetUrl(tweet)"
+                target="_blank"
+                rel="noreferrer"
+                class="button"
+              >
+                Open on X <ExternalLink :size="14" aria-hidden="true" />
+              </a>
+              <button
+                v-if="selectedText?.postId === String(tweet.id)"
+                type="button"
+                class="button"
+                @pointerdown.prevent
+                @click="blockText(selectedText.text)"
+              >
+                <Ban :size="15" class="shrink-0" aria-hidden="true" /><span
+                  class="truncate"
+                  >Block “{{ selectedText.text }}”</span
+                >
+              </button>
+            </div>
+            <p
+              v-if="actionErrors[tweet.id]"
+              class="mt-3 text-sm text-danger"
+              role="alert"
+            >
+              {{ actionErrors[tweet.id] }}
+            </p>
+          </article>
+        </section>
+
+        <div
+          v-if="loading"
+          class="grid gap-6 py-6"
+          role="status"
+          aria-label="Loading posts"
+        >
+          <span class="text-sm text-muted">Loading your timeline…</span>
+          <div
+            v-if="!tweets.length"
+            v-for="index in 3"
+            :key="index"
+            class="h-36 animate-pulse border-b border-rule bg-paper-shade"
+          ></div>
         </div>
-        <p v-if="actionErrors[tweet.id]" class="mt-3 text-sm text-danger" role="alert">{{ actionErrors[tweet.id] }}</p>
-      </article>
-    </section>
+        <div
+          v-else-if="!visibleTweets.length && !error"
+          class="manuscript-empty"
+        >
+          <div>
+            <strong>{{
+              tweets.length ? "No matching posts" : "No posts yet"
+            }}</strong>
+          </div>
+        </div>
 
-    <div v-if="loading" class="grid gap-6 py-6" role="status" aria-label="Loading posts">
-      <span class="text-sm text-muted">Loading your timeline…</span>
-      <div v-if="!tweets.length" v-for="index in 3" :key="index" class="h-36 animate-pulse border-b border-rule bg-paper-shade"></div>
-    </div>
-    <div v-else-if="!visibleTweets.length && !error" class="manuscript-empty">
-      <div><strong>{{ tweets.length ? 'No matching English posts yet' : 'No posts returned yet' }}</strong><p class="mt-2 text-sm text-muted">{{ tweets.length ? 'Only English posts are shown. Adjust your block list or load more.' : 'Try Latest posts to check your home timeline again.' }}</p></div>
-    </div>
-
-    <div ref="sentinel" class="feed-sentinel" aria-hidden="true"></div>
-    <div class="feed-end">
-      <button v-if="hasMore && !error && !loading" type="button" class="min-h-11 border border-rule-strong px-4 text-sm hover:bg-paper-shade" @click="loadMore({ manual: true })">Load more posts</button>
-      <p v-if="autoPaused && !error" class="mt-3 text-sm text-muted">No new visible posts in the last few pages. Adjust your block list or load more to keep checking.</p>
-      <p v-if="!hasMore && tweets.length" class="text-sm text-muted">You have reached the end of this timeline. Latest posts starts a fresh feed.</p>
-      <a v-if="tweets.length" href="#feed-top" class="mt-4 inline-flex min-h-11 items-center gap-2 text-xs text-muted underline underline-offset-4"><ArrowUp :size="14" aria-hidden="true" /> Back to top</a>
-    </div>
-    </div>
-    <FeedThread v-if="selectedPost" :post="selectedPost" :blocked-terms="blockedTerms" :liked-ids="likedIds" :bookmarked-ids="bookmarkedIds" :pending-actions="pendingActions" :action-errors="actionErrors" @close="closeThread" @action="actOnPost" />
+        <div ref="sentinel" class="feed-sentinel" aria-hidden="true"></div>
+        <div class="feed-end">
+          <button
+            v-if="hasMore && !error && !loading"
+            type="button"
+            class="button"
+            @click="loadMore({ manual: true })"
+          >
+            Load more posts
+          </button>
+          <p v-if="autoPaused && !error" class="mt-3 text-sm text-muted">
+            No new visible posts in the last few pages. Adjust your block list
+            or load more to keep checking.
+          </p>
+          <p v-if="!hasMore && tweets.length" class="text-sm text-muted">
+            End of feed
+          </p>
+          <a
+            v-if="tweets.length"
+            href="#feed-top"
+            class="mt-4 inline-flex min-h-11 items-center gap-2 text-xs text-muted underline underline-offset-4"
+            ><ArrowUp :size="14" aria-hidden="true" /> Back to top</a
+          >
+        </div>
+      </div>
+      <FeedThread
+        v-if="selectedPost"
+        :post="selectedPost"
+        :blocked-terms="blockedTerms"
+        :liked-ids="likedIds"
+        :bookmarked-ids="bookmarkedIds"
+        :pending-actions="pendingActions"
+        :action-errors="actionErrors"
+        @close="closeThread"
+        @action="actOnPost"
+      />
     </div>
   </main>
   <Teleport to="body">
-    <div v-if="contextMenu" ref="menuElement" class="feed-selection-menu" role="menu" aria-label="Selected feed text" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @keydown.down.prevent @keydown.up.prevent>
-      <button ref="menuButton" type="button" role="menuitem" class="flex min-h-11 w-full items-start gap-3 px-4 py-3 text-left text-sm hover:bg-paper-shade" @pointerdown.prevent @click="blockText(contextMenu.text)">
-        <Ban :size="16" class="mt-0.5 shrink-0" aria-hidden="true" /><span class="min-w-0 break-words">Block “{{ contextMenu.text }}”</span>
+    <div
+      v-if="contextMenu"
+      ref="menuElement"
+      class="feed-selection-menu"
+      role="menu"
+      aria-label="Selected feed text"
+      :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+      @keydown.down.prevent
+      @keydown.up.prevent
+    >
+      <button
+        ref="menuButton"
+        type="button"
+        role="menuitem"
+        class="flex min-h-11 w-full items-start gap-3 px-4 py-3 text-left text-sm hover:bg-paper-shade"
+        @pointerdown.prevent
+        @click="blockText(contextMenu.text)"
+      >
+        <Ban :size="16" class="mt-0.5 shrink-0" aria-hidden="true" /><span
+          class="min-w-0 break-words"
+          >Block “{{ contextMenu.text }}”</span
+        >
       </button>
-      <p class="border-t border-rule px-4 py-2 text-xs text-muted">Hide matching posts. Case insensitive.</p>
+      <p class="border-t border-rule px-4 py-2 text-xs text-muted">
+        Hide matching posts. Case insensitive.
+      </p>
     </div>
   </Teleport>
 </template>

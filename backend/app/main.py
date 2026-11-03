@@ -6,8 +6,10 @@ from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Query, Path as ApiPath
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 
 from app.analytics import AnalyticsConfigurationError, AnalyticsDataError, fetch_analytics_summary
+from app.articles import ArticleLinkError, ArticleContentError, fetch_article
 from app.config import load_environment
 from app.models import Preset, PresetField, RunRequest, RunResponse
 from app.codex_client import (
@@ -25,7 +27,10 @@ from app.storage import GrowthStore
 from app.interests import collect_interest_context
 from app.feed import fetch_feed_page
 from app.trends import ResearchError, fetch_trending_research
-from app.prospects import get_run as get_prospect_run, start_run as start_prospect_run, suggest_response
+from app.prospects import (
+    get_run as get_prospect_run, start_run as start_prospect_run, suggest_response,
+    compact_run, run_progress, research_details, get_prospect, save_draft, draft_versions,
+)
 from app.twitter_cli import (
     PRESETS,
     CliExecutionError,
@@ -59,22 +64,87 @@ def get_growth_store() -> GrowthStore:
     return GrowthStore(os.environ.get("GROWTH_DB_PATH", default_path))
 
 
+class ArticleRequest(BaseModel):
+    url: str
+
+
+@app.post("/api/articles/read")
+def article_read(request: ArticleRequest):
+    try:
+        return fetch_article(request.url)
+    except ArticleLinkError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ArticleContentError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except CliTimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Loading this X article timed out. Please retry.") from exc
+    except CliNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @app.post("/api/prospects/runs")
-def prospect_run_start():
-    return start_prospect_run()
+def prospect_run_start(compact: bool = False):
+    run = start_prospect_run()
+    return compact_run(run) if compact else run
 
 
 @app.get("/api/prospects/runs/latest")
-def prospect_run_latest():
-    return {"run": get_prospect_run()}
+def prospect_run_latest(compact: bool = False):
+    run = get_prospect_run()
+    return {"run": compact_run(run) if compact else run}
 
 
 @app.get("/api/prospects/runs/{run_id}")
-def prospect_run_status(run_id: str):
+def prospect_run_status(run_id: str, compact: bool = False):
     run = get_prospect_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Research run not found")
-    return run
+    return compact_run(run) if compact else run
+
+
+@app.get("/api/prospects/runs/{run_id}/progress")
+def prospect_progress(run_id: str):
+    run = get_prospect_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Research run not found")
+    return run_progress(run)
+
+
+@app.get("/api/prospects/runs/{run_id}/research")
+def prospect_research_details(run_id: str):
+    run = get_prospect_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Research run not found")
+    return research_details(run)
+
+
+@app.get("/api/prospects/runs/{run_id}/prospect")
+def prospect_detail(run_id: str, url: str = Query(...)):
+    try:
+        return get_prospect(run_id, url)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+class ProspectDraftRequest(BaseModel):
+    url: str
+    text: str
+
+
+@app.put("/api/prospects/runs/{run_id}/draft")
+def prospect_draft_save(run_id: str, request: ProspectDraftRequest):
+    try:
+        return save_draft(run_id, request.url, request.text)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/prospects/runs/{run_id}/versions")
+def prospect_draft_versions(run_id: str, url: str = Query(...)):
+    try:
+        return {"versions": draft_versions(run_id, url)}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/api/prospects/runs/{run_id}/response")

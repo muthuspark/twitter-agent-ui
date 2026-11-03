@@ -232,10 +232,59 @@ def suggest_response(run_id, url):
     text = str(result.get("suggested_response", "")).strip()
     if not text:
         raise CodexError("No response draft was returned. Please try again.")
-    reply = {"suggested_response": text, "response_note": str(result.get("response_note", "")).strip(), "response_generated_at": utcnow()}
-    with connection() as db:
+    # Re-read after generation: the user may have edited while the model was running.
+    with _LOCK, connection() as db:
+        row = db.execute("SELECT payload FROM prospect_replies WHERE run_id = ? AND url = ?", (run_id, canonical)).fetchone()
+        previous = json.loads(row[0]) if row else post
+        current = previous.get("draft_text", previous.get("suggested_response", ""))
+        remember_version(db, run_id, canonical, current, "previous")
+        edited = "draft_text" in previous and current != previous.get("suggested_response", "")
+        reply = {"suggested_response": text, "response_note": str(result.get("response_note", "")).strip(),
+                 "response_generated_at": utcnow(), "draft_text": current if edited else text,
+                 "draft_saved_at": previous.get("draft_saved_at", "") if edited else utcnow()}
+        remember_version(db, run_id, canonical, text, "generated")
         db.execute("INSERT OR REPLACE INTO prospect_replies VALUES (?, ?, ?)", (run_id, canonical, json.dumps(reply)))
     return reply
+
+
+def remember_version(db, run_id, url, text, kind):
+    if text is None:
+        return
+    last = db.execute("SELECT text FROM prospect_reply_versions WHERE run_id = ? AND url = ? ORDER BY id DESC LIMIT 1", (run_id, url)).fetchone()
+    if last is None or last[0] != text:
+        db.execute("INSERT INTO prospect_reply_versions (run_id, url, text, kind, saved_at) VALUES (?, ?, ?, ?, ?)",
+                   (run_id, url, text, kind, utcnow()))
+
+
+def get_prospect(run_id, url):
+    run = get_run(run_id)
+    canonical = post_url(url)
+    post = next((p for p in (run or {}).get("posts", []) if canonical and post_url(p["url"]) == canonical), None)
+    if post is None:
+        raise LookupError("Saved prospect not found")
+    refs = {ref for need in post.get("requirements", []) for ref in need.get("evidence_ids", [])}
+    evidence = [e for e in (run.get("source_snapshot") or {}).get("evidence", []) if e["id"] in refs]
+    return {**post, "code_evidence": evidence}
+
+
+def save_draft(run_id, url, text):
+    post = get_prospect(run_id, url)
+    canonical = post_url(url)
+    with _LOCK, connection() as db:
+        row = db.execute("SELECT payload FROM prospect_replies WHERE run_id = ? AND url = ?", (run_id, canonical)).fetchone()
+        reply = json.loads(row[0]) if row else {key: post.get(key, "") for key in ("suggested_response", "response_note", "response_generated_at")}
+        remember_version(db, run_id, canonical, reply.get("draft_text", reply.get("suggested_response", "")), "previous")
+        reply.update(draft_text=text, draft_saved_at=utcnow())
+        remember_version(db, run_id, canonical, text, "edited")
+        db.execute("INSERT OR REPLACE INTO prospect_replies VALUES (?, ?, ?)", (run_id, canonical, json.dumps(reply)))
+    return reply
+
+
+def draft_versions(run_id, url):
+    get_prospect(run_id, url)
+    with connection() as db:
+        rows = db.execute("SELECT id, text, kind, saved_at FROM prospect_reply_versions WHERE run_id = ? AND url = ? ORDER BY id DESC", (run_id, post_url(url))).fetchall()
+    return [{"id": row[0], "text": row[1], "kind": row[2], "saved_at": row[3]} for row in rows]
 
 
 def search_product_code(posts, snapshot):
@@ -350,6 +399,8 @@ def connection():
     db = sqlite3.connect(path)
     db.execute("CREATE TABLE IF NOT EXISTS prospect_runs (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS prospect_replies (run_id TEXT NOT NULL, url TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (run_id, url))")
+    db.execute("CREATE TABLE IF NOT EXISTS prospect_reply_versions (id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, url TEXT NOT NULL, text TEXT NOT NULL, kind TEXT NOT NULL, saved_at TEXT NOT NULL)")
+    db.execute("CREATE INDEX IF NOT EXISTS prospect_reply_version_lookup ON prospect_reply_versions (run_id, url, id)")
     return db
 
 
@@ -374,6 +425,53 @@ def get_run(run_id=None):
             run.update(status="interrupted", stage="Research was interrupted by a server restart. Completed results are preserved; run again to refresh.")
             save_run(run)
         return run
+
+
+def notice_groups(warnings):
+    groups = {"issues": [], "checks": [], "notes": []}
+    for warning in dict.fromkeys(warnings):
+        if re.search(r"unavailable|inaccessible|could not|cannot|failed|timed out|timeout|forbidden|\b403\b|\b404\b|not inspected|anchor changed|stale search|incomplete for group", warning, re.I):
+            group = "issues"
+        elif re.search(r"qualitative|search.volume|market prevalence|executed verbatim|not exhaustive|not exhaustively|not.*proof", warning, re.I):
+            group = "notes"
+        else:
+            group = "checks"
+        groups[group].append(warning)
+    return groups
+
+
+def run_progress(run):
+    notices = notice_groups(run.get("warnings", []))
+    searched = sum(q["status"] == "searched" for q in run["queries"])
+    snapshot = run.get("source_snapshot") or {}
+    revision = hashlib.sha256(json.dumps([run["posts"], run["queries"], run.get("warnings", []), snapshot.get("fingerprint")], sort_keys=True).encode()).hexdigest()
+    status = run["status"]
+    if status == "partial" and searched == len(run["queries"]) and not notices["issues"] and not run.get("error"):
+        status = "complete"
+    return {"id": run["id"], "status": status, "stage": run.get("stage", ""), "revision": revision,
+            "searched": searched, "attempted": sum(q["status"] != "pending" for q in run["queries"]),
+            "total_queries": len(run["queries"]), "post_count": len(run["posts"]), "error": run.get("error", "")}
+
+
+def compact_run(run):
+    if run is None:
+        return None
+    result = {**run_progress(run), "started_at": run["started_at"], "completed_at": run.get("completed_at", ""),
+              "notices": notice_groups(run.get("warnings", []))}
+    result["posts"] = [{**{key: post.get(key, "") for key in (
+        "url", "title", "author", "published_at", "confidence", "coverage", "recommendation")},
+        "quote_preview": post.get("quote", "").removeprefix("> ")[:180],
+        "coverage_checked": bool(post.get("requirements")),
+        "has_response": bool(post.get("draft_text") or post.get("suggested_response"))} for post in run["posts"]]
+    return result
+
+
+def research_details(run):
+    snapshot = run.get("source_snapshot") or {}
+    return {"queries": run["queries"], "notices": notice_groups(run.get("warnings", [])),
+            "source_snapshot": {**{key: snapshot.get(key) for key in ("scope", "fingerprint", "inspected_at", "provider_files")},
+                                "evidence_count": len(snapshot.get("evidence", [])),
+                                "semantic_search_count": len(snapshot.get("semantic_searches", []))}}
 
 
 def start_run():
@@ -448,7 +546,7 @@ def execute_run(run):
                 run["warnings"].append(f"Search group {offset // 4 + 1} could not finish: {exc}")
             save_run(run)
         searched = sum(q["status"] == "searched" for q in run["queries"])
-        run["status"] = "complete" if searched == 20 and not run["warnings"] else "partial" if searched or run["posts"] else "failed"
+        run["status"] = "complete" if searched == 20 and not notice_groups(run["warnings"])["issues"] else "partial" if searched or run["posts"] else "failed"
         run["stage"] = f"Research finished. {searched}/20 searches confirmed; {len(run['posts'])} potential conversations."
     except Exception as exc:
         run.update(status="failed", stage="Research could not finish", error=str(exc) if isinstance(exc, (CodexError, CodexConfigurationError)) else "Could not inspect Jovis source or save research. Check the backend logs and configuration.")
