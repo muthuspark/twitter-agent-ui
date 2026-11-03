@@ -131,7 +131,7 @@ textarea::placeholder {
   min-height: 3.75rem;
   padding-block: 0.75rem;
   border-bottom: 2px solid transparent;
-  font-size: 0.875rem;
+  font-size: 1rem;
   color: var(--muted);
   white-space: nowrap;
 }
@@ -154,7 +154,7 @@ textarea::placeholder {
   border-radius: 6px;
   background: var(--paper);
   color: var(--ink);
-  font-size: 0.875rem;
+  font-size: 1rem;
   font-weight: 500;
   line-height: 1.5;
   white-space: nowrap;

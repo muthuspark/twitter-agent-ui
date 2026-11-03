@@ -553,7 +553,7 @@ onBeforeUnmount(stop);
               >
               <time
                 :datetime="tweet.createdAtISO || undefined"
-                class="text-xs text-muted"
+                class="text-sm text-muted"
                 >{{
                   formatDate(tweet.createdAtISO || tweet.createdAtLocal)
                 }}</time
@@ -562,14 +562,14 @@ onBeforeUnmount(stop);
             <p
               data-feed-text
               tabindex="-1"
-              class="mt-3 whitespace-pre-wrap text-sm leading-6"
+              class="mt-3 whitespace-pre-wrap text-base leading-6"
             >
               {{ tweet.text }}
             </p>
 
             <blockquote
               v-if="tweet.quotedTweet"
-              class="mt-4 border border-rule p-4 text-sm"
+              class="mt-4 border border-rule p-4 text-base"
             >
               <strong>{{
                 tweet.quotedTweet.author?.name ||
@@ -613,7 +613,7 @@ onBeforeUnmount(stop);
             </div>
 
             <footer
-              class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted"
+              class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted"
             >
               <span>{{ formatMetric(tweet.metrics?.likes) }} likes</span>
               <span>{{ formatMetric(tweet.metrics?.retweets) }} reposts</span>

@@ -140,7 +140,7 @@ onBeforeUnmount(deactivate);
         <h2 id="feed-thread-heading" tabindex="-1" class="text-xl font-bold">
           Thread &amp; replies
         </h2>
-        <p class="mt-1 text-xs text-muted">
+        <p class="mt-1 text-sm text-muted">
           English only. Your block list applies here too.
         </p>
       </div>
@@ -168,14 +168,14 @@ onBeforeUnmount(deactivate);
           Selected post
         </p>
         <header class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <strong class="text-sm">{{
+          <strong class="text-base">{{
             tweet.author?.name || tweet.author?.screenName || "Unknown author"
           }}</strong>
-          <span v-if="tweet.author?.screenName" class="text-xs text-muted"
+          <span v-if="tweet.author?.screenName" class="text-sm text-muted"
             >@{{ tweet.author.screenName }}</span
           >
           <time
-            class="text-xs text-muted"
+            class="text-sm text-muted"
             :datetime="tweet.createdAtISO || undefined"
             >{{ formatDate(tweet.createdAtISO || tweet.createdAtLocal) }}</time
           >
@@ -183,13 +183,13 @@ onBeforeUnmount(deactivate);
         <p
           data-feed-text
           tabindex="-1"
-          class="mt-3 whitespace-pre-wrap text-sm leading-6"
+          class="mt-3 whitespace-pre-wrap text-base leading-6"
         >
           {{ tweet.text }}
         </p>
         <blockquote
           v-if="tweet.quotedTweet"
-          class="mt-4 border border-rule p-3 text-sm"
+          class="mt-4 border border-rule p-3 text-base"
         >
           <strong>{{
             tweet.quotedTweet.author?.name ||
@@ -225,7 +225,7 @@ onBeforeUnmount(deactivate);
             /></a>
           </template>
         </div>
-        <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+        <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
           <span>{{ formatMetric(tweet.metrics?.likes) }} likes</span
           ><span>{{ formatMetric(tweet.metrics?.retweets) }} reposts</span
           ><span>{{ formatMetric(tweet.metrics?.replies) }} replies</span>
