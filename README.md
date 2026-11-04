@@ -240,9 +240,13 @@ feed position. Escape closes the thread (or dismisses the text context menu firs
 ## Potential Customers
 
 The **Customers** tab runs 20 problem-focused queries across public X,
-Reddit, LinkedIn and Hacker News. Reddit uses OpenCLI and your signed-in Chrome;
-X, LinkedIn and Hacker News use Codex live web research. It opens original
-posts, distinguishes personal pain from vendor promotion, and compares prospect
+Reddit, Hacker News and 20 additional public communities. Reddit discovery uses the Exa API with `EXA_WEB_SEARCH_API`
+from the local `.env`; requests are restricted to `reddit.com`, with ten results per
+query and a rolling 48-hour window across all discovery sources. Older, future-dated and
+undated results are excluded. Hacker News uses the public Algolia search API
+for stories and comments. X uses Codex live web research. LinkedIn is excluded.
+Research does not check or use your signed-in browser or cookies. It reads source
+excerpts, distinguishes personal pain from vendor promotion, and compares prospect
 requirements with the current local Jovis source. Research never contacts people
 or publishes replies automatically. X access is not required; inaccessible platforms and failed
 search groups appear as limitations rather than invented results.
@@ -266,78 +270,56 @@ process for research coordination.
   client uses `REDDIT_CLI_PATH` when provided; it can be blocked even with valid
   cookies, so the app does not automatically fall back to it.
 
-### Connect Reddit
+### Public search configuration
 
-Install the supported CLI release on the machine running the backend:
+Set `EXA_WEB_SEARCH_API` in the project or backend `.env`, then restart the backend.
+The key stays server-side. The Customers search-status endpoint checks configuration
+without accessing a browser account. Missing keys, quota errors and unavailable
+sources produce partial coverage; no authenticated browser fallback runs.
 
-```bash
-npm install -g @jackwener/opencli@2.0.2
-```
+Exa text is treated as an indexed excerpt, not a verified complete Reddit post.
+Original-author attribution and comments may be incomplete. Pain quotes must match
+retrieved text, and incomplete evidence caps prospect scores. Hacker News comments
+are attributed to their own authors. Searches are bounded to ten results per source
+per query; up to five new excerpts per query are classified using Codex without web
+or browser tools. A full run makes up to 40 Exa requests (20 Reddit and 20 community searches); content/API charges apply.
 
-Add the [OpenCLI Browser Bridge extension](https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk)
-to the Chrome profile where you use Reddit. Sign in to reddit.com normally and
-keep Chrome open. Verify the connection from the backend machine:
+The additional communities are searched in rotating groups of five, one group per
+problem query. Each community is included in five of the 20 queries, with up to ten
+combined results per group and five new excerpts classified. Coverage records list
+the actual domains queried together; successful search does not mean every site
+returned a result or that its entire discussion history was inspected. Homepages,
+profiles, categories and product documentation are rejected. Community excerpts
+retain the same 48-hour date gate, deduplication, quote checks and product-fit review.
+The Customers list displays verified product fit of at least 45%.
 
-```bash
-opencli doctor
-opencli reddit whoami
-```
+Reddit publishing remains a separate, explicit action. Use **Optional Reddit posting
+account** to check your account through OpenCLI and signed-in Chrome only when you
+want to post. No posting-account check runs automatically when visiting Customers
+or starting research. The legacy CLI readers remain available for compatibility.
 
-The Customers tab shows Reddit connection status and a **Refresh Reddit status**
-button. Its status endpoint is `GET /api/prospects/sources/reddit/status`.
-The backend must reach OpenCLI's local daemon and the connected Chrome profile.
-Refresh browser login normally if necessary. Restart the backend after changing
-its PATH or environment configuration.
+### Additional public communities
 
-The app verifies identity through `opencli reddit whoami`. Search navigates a
-dedicated browser search tab and reads its rendered result units; OpenCLI's built-in
-fetch-based search can hit a login wall even when browser navigation works.
-The app reads selected posts with `opencli reddit read`, using the search result's
-date and permalink and the reader's original text/author. Empty results require
-an explicit empty-state message; loading pages and markup changes become errors.
-Each worker owns its own search session, which is released after the run without
-closing user tabs.
-
-Reddit searches use the same 20 queries, relevance sorting, a past-month filter,
-and at most 10 results per query. Codex selects up to three candidates per query
-without browsing. Each selected post is fetched by ID with up to 25 comments;
-post IDs are deduplicated across the run. Comments provide context, not separate
-leads. Deleted/removed posts and vendor pitches are excluded. Pain quotes must
-match the fetched original title or body; author, date and URL come from CLI data.
-Partial comment coverage is labeled. No exhaustive comment expansion or pagination
-is performed in this version.
-
-The adapter uses the existing browser session without exporting cookies. The app
-never accepts cookie uploads or puts credentials or raw CLI diagnostics into AI
-prompts, research records or API responses. It only invokes identity checks,
-read-only search-page navigation/extraction, post reading, and owned-tab cleanup.
-The separate **Post on Reddit** action publishes only the reply you choose in the
-editor. It does not expose messaging, voting or subscription commands.
-
-Missing authentication, CLI errors or rate limits do not stop the other platforms.
-Reddit web search is allowed as an explicitly labeled fallback, and does not count
-as a successful CLI search. Rate limits or authentication/access failures suspend
-further Reddit CLI requests for that run. Research details show per-query CLI
-status, returned/inspected counts, errors and fallback attempts. Successful empty
-searches count as searched. Coverage failures make a run partial; old saved runs
-show Reddit coverage as not recorded. CLI calls run sequentially with a 60-second
-timeout. The existing 20-query counter counts a query when either CLI search or
-web research succeeded; it is not a count of successful searches on every platform.
-
-For a local smoke test after login:
-
-```bash
-opencli reddit whoami
-opencli reddit read POST_ID --limit 25 --depth 1 --max-length 40000
-```
-
-Use an actual Reddit post ID in place of `POST_ID`, then run **Find customers**
-to test the app's browser-backed search. OpenCLI 2.0.2 returns `ok/data/error` JSON
-envelopes; unsupported responses are reported instead of accepted as empty results.
-Post reads request up to 25 top-level comments, with no reply or "more comments"
-expansion. Their coverage is always labeled partial because the reader's output
-does not certify completeness. Search navigation and browser reads were verified
-with extension 1.0.26.
+1. [Indie Hackers](https://www.indiehackers.com)
+2. [UK Business Forums](https://www.ukbusinessforums.co.uk)
+3. [The Fastlane Forum](https://www.thefastlaneforum.com)
+4. [Product Hunt Forums](https://www.producthunt.com)
+5. [The Workplace Stack Exchange](https://workplace.stackexchange.com)
+6. [Project Management Stack Exchange](https://pm.stackexchange.com)
+7. [Atlassian Community](https://community.atlassian.com)
+8. [Asana Community](https://forum.asana.com)
+9. [monday.com Community](https://community.monday.com)
+10. [ClickUp Feedback](https://feedback.clickup.com)
+11. [Airtable Community](https://community.airtable.com)
+12. [Zapier Community](https://community.zapier.com)
+13. [Make Community](https://community.make.com)
+14. [n8n Community](https://community.n8n.io)
+15. [Superhuman / Coda Community](https://connect.superhuman.com)
+16. [HubSpot Community](https://community.hubspot.com)
+17. [Zoho Community](https://help.zoho.com)
+18. [UiPath Community](https://forum.uipath.com)
+19. [Microsoft Power Platform Community](https://community.powerplatform.com)
+20. [Microsoft Tech Community](https://techcommunity.microsoft.com)
 
 ### Product assessment and review
 

@@ -34,6 +34,12 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(prospects, "source_snapshot", snapshot)
     monkeypatch.setattr(prospects, "search_product_code", lambda *args: [])
     monkeypatch.setattr(prospects.reddit_cli, "close_research", lambda: None)
+    monkeypatch.setattr(prospects, "collect_reddit_query", lambda *args: ([], {
+        "status": "unavailable", "result_count": 0, "inspected_count": 0,
+        "error": "Exa unavailable in web pipeline tests.", "web_fallback": "not_needed"}, []))
+    monkeypatch.setattr(prospects, "collect_public_query", lambda *args: ([], {
+        "status": "searched", "result_count": 0, "inspected_count": 0,
+        "error": "", "web_fallback": "not_needed"}, []))
     # These existing pipeline tests supply their own multi-platform web researcher.
     monkeypatch.setattr(prospects.reddit_cli, "connection_status", lambda: {
         "authenticated": False, "message": "Reddit CLI unavailable in web pipeline tests.",
@@ -47,6 +53,8 @@ def isolated(monkeypatch, tmp_path):
     ("https://twitter.com/alice/status/123?utm_source=test", "https://x.com/alice/status/123"),
     ("https://old.reddit.com/r/SaaS/comments/abc123/title/comment?context=3", "https://www.reddit.com/r/saas/comments/abc123/"),
     ("https://news.ycombinator.com/item?id=123", "https://news.ycombinator.com/item?id=123"),
+    ("https://www.linkedin.com/posts/founder_business-context-123", ""),
+    ("https://www.linkedin.com/feed/update/urn:li:activity:123", ""),
 ])
 def test_only_individual_safe_post_links(url, expected):
     assert prospects.post_url(url) == expected
@@ -103,7 +111,9 @@ def test_all_twenty_queries_run_and_posts_deduplicate_with_reddit_fallback(isola
     def research(group, now):
         calls.extend(q["query"] for q in group)
         return {"queries": [{"query": q["query"], "status": "searched", "finding": "One relevant post"} for q in group],
-                "posts": [post(), post(url="https://old.reddit.com/r/SaaS/comments/abc123/other-title/"), post(lead_type="vendor", url="https://x.com/vendor/status/2")], "warnings": []}
+                "posts": [post(), post(url="https://old.reddit.com/r/SaaS/comments/abc123/other-title/"),
+                          post(lead_type="vendor", url="https://x.com/vendor/status/2"),
+                          post(url="https://www.linkedin.com/posts/founder_business-context-123")], "warnings": []}
     monkeypatch.setattr(prospects, "research_group", research)
     monkeypatch.setattr(prospects, "assess_posts", lambda posts, _: [assessment(url=p["url"]) for p in posts])
     prospects.execute_run(seed_run())
@@ -128,7 +138,7 @@ def test_failed_search_group_preserves_results_and_continues(isolated, monkeypat
     assert result["status"] == "partial"
     assert len(calls) == 5
     assert len(result["posts"]) == 1
-    assert sum(q["status"] == "unavailable" for q in result["queries"]) == 4
+    assert all(q["status"] == "searched" for q in result["queries"])  # HN search still succeeded.
 
 
 def test_gap_failure_retains_discovered_links(isolated, monkeypatch):
@@ -216,6 +226,17 @@ def test_source_never_sent_to_web_research(monkeypatch):
     assert calls[0][1]["web_search"] is True
     assert calls[1][0]["source_snapshot"] == snapshot()
     assert not calls[1][1].get("web_search")
+
+
+def test_customer_research_excludes_linkedin(monkeypatch):
+    def fake(system, payload, schema, **kwargs):
+        assert "Search only public X discussions" in system
+        assert "do not search LinkedIn, open linkedin.com links" in system
+        assert "Exclude linkedin.com from search queries" in system
+        return json.dumps({"queries": [], "posts": [], "warnings": []})
+
+    monkeypatch.setattr(prospects, "_run_codex", fake)
+    prospects.research_group(prospects.QUERIES[:4], NOW.isoformat())
 
 
 def test_semantic_search_rereads_current_code_and_rejects_unsafe_paths(monkeypatch, tmp_path):

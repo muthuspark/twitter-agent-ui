@@ -159,14 +159,14 @@ def collector(monkeypatch):
 def test_collector_preserves_cli_identity_quotes_dates_and_deduplicates(collector):
     seen = set()
     connection = {"authenticated": True}
-    posts, coverage, warnings = prospects.collect_reddit_query("decisions", seen, connection)
+    posts, coverage, warnings = prospects.collect_reddit_cli_query("decisions", seen, connection)
     assert coverage == {"status": "searched", "result_count": 2, "inspected_count": 2, "error": "", "web_fallback": "not_needed"}
     assert not warnings
     assert collector[0] == ["abc123", "def456"]
     assert all(p["collection_source"] == "reddit_cli" and p["author"] == "founder" for p in posts)
     assert all(p["quote"] in raw_post()["selftext"] for p in posts)
     assert all(p["caveats"] for p in posts)
-    assert prospects.collect_reddit_query("another query", seen, connection)[0] == []
+    assert prospects.collect_reddit_cli_query("another query", seen, connection)[0] == []
     assert len(collector[0]) == 2
 
 
@@ -177,7 +177,7 @@ def test_hallucinated_quote_is_replaced_by_original_title(collector, monkeypatch
             item.update(quote="Invented buyer complaint", personal_pain=True)
         return json.dumps(result)
     monkeypatch.setattr(prospects, "_run_codex", model)
-    posts, _, warnings = prospects.collect_reddit_query("query", set(), {"authenticated": True})
+    posts, _, warnings = prospects.collect_reddit_cli_query("query", set(), {"authenticated": True})
     assert warnings
     assert all(p["quote"] == "We lose decisions" and not p["personal_pain"] for p in posts)
 
@@ -188,7 +188,7 @@ def test_analysis_failure_keeps_fetched_sources(collector, monkeypatch):
             return collector[1](system, payload, schema, **kwargs)
         raise prospects.CodexError("private model diagnostic")
     monkeypatch.setattr(prospects, "_run_codex", model)
-    posts, coverage, warnings = prospects.collect_reddit_query("query", set(), {"authenticated": True})
+    posts, coverage, warnings = prospects.collect_reddit_cli_query("query", set(), {"authenticated": True})
     assert len(posts) == 2 and coverage["status"] == "partial"
     assert "private" not in json.dumps(warnings)
 
@@ -198,10 +198,10 @@ def test_rate_limit_stops_further_reddit_requests(collector, monkeypatch):
         raise reddit_cli.RedditCliError("rate_limited")
     monkeypatch.setattr(reddit_cli, "read", limited)
     connection = {"authenticated": True}
-    _, coverage, _ = prospects.collect_reddit_query("query", set(), connection)
+    _, coverage, _ = prospects.collect_reddit_cli_query("query", set(), connection)
     assert coverage["status"] == "partial" and not connection["authenticated"]
     monkeypatch.setattr(reddit_cli, "search", lambda *a: pytest.fail("Must stop after rate limiting"))
-    assert prospects.collect_reddit_query("next", set(), connection)[1]["status"] == "unavailable"
+    assert prospects.collect_reddit_cli_query("next", set(), connection)[1]["status"] == "unavailable"
 
 
 def test_selection_is_bounded_and_deleted_posts_are_skipped(collector, monkeypatch):
@@ -212,7 +212,7 @@ def test_selection_is_bounded_and_deleted_posts_are_skipped(collector, monkeypat
             return json.dumps({"post_ids": ["invented", *[f"abc{i}" for i in range(8)]]})
         return collector[1](system, payload, schema, **kwargs)
     monkeypatch.setattr(prospects, "_run_codex", select)
-    posts, coverage, _ = prospects.collect_reddit_query("query", set(), {"authenticated": True})
+    posts, coverage, _ = prospects.collect_reddit_cli_query("query", set(), {"authenticated": True})
     assert len(posts) == coverage["inspected_count"] == 3
     assert collector[0] == ["abc0", "abc1", "abc2"]
 
@@ -224,7 +224,7 @@ def test_vendor_classification_is_excluded_even_without_pain_quote(collector, mo
             item.update(lead_type="vendor", quote="")
         return json.dumps(result)
     monkeypatch.setattr(prospects, "_run_codex", model)
-    assert prospects.collect_reddit_query("query", set(), {"authenticated": True})[0] == []
+    assert prospects.collect_reddit_cli_query("query", set(), {"authenticated": True})[0] == []
 
 
 @pytest.fixture
@@ -235,6 +235,11 @@ def pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr(prospects, "search_product_code", lambda *args: [])
     monkeypatch.setattr(prospects, "assess_posts", lambda *args: [])
     monkeypatch.setattr(reddit_cli, "connection_status", lambda: {"authenticated": True, "message": "Connected"})
+    # Exercise the retained legacy pipeline explicitly; production discovery uses public search.
+    state = {"authenticated": True, "message": "Connected"}
+    monkeypatch.setattr(prospects, "collect_reddit_query", lambda query, seen, _: prospects.collect_reddit_cli_query(query, seen, state))
+    monkeypatch.setattr(prospects, "collect_public_query", lambda *args: ([], {
+        "status": "searched", "result_count": 0, "inspected_count": 0, "error": "", "web_fallback": "not_needed"}, []))
     return {"id": "reddit-run", "status": "running", "started_at": "2026-11-03T00:00:00+00:00", "completed_at": "",
             "queries": [{**q, "status": "pending", "finding": ""} for q in prospects.QUERIES],
             "posts": [], "warnings": [], "error": ""}

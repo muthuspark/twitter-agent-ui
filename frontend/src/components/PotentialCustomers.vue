@@ -50,6 +50,7 @@ const researchOpen = ref(false);
 const researchLoading = ref(false);
 const researchError = ref("");
 const redditStatus = ref(null);
+const searchStatus = ref(null);
 const redditStatusLoading = ref(false);
 const redditStatusError = ref("");
 const resultsHeading = ref(null);
@@ -65,7 +66,11 @@ const running = computed(
   () => starting.value || run.value?.status === "running",
 );
 const publishing = computed(() => Object.values(posting.value).some(Boolean));
-const allPosts = computed(() => run.value?.posts || []);
+const allPosts = computed(() =>
+  (run.value?.posts || []).filter(
+    (post) => post.coverage_checked && Number(post.coverage) >= 45,
+  ),
+);
 const sortedPosts = computed(() =>
   sortProspects(
     allPosts.value.filter(
@@ -137,6 +142,15 @@ async function request(path, options) {
         : "Could not load customer research. Please retry.",
     );
   return body;
+}
+
+async function loadSearchStatus() {
+  try {
+    const status = await request("/api/prospects/sources/research/status");
+    if (!disposed) searchStatus.value = status;
+  } catch {
+    if (!disposed) searchStatus.value = { configured: false, message: "Could not check public search configuration." };
+  }
 }
 
 async function loadRedditStatus() {
@@ -491,7 +505,7 @@ async function changePage(value) {
 function activate() {
   if (active) return;
   active = true;
-  loadRedditStatus();
+  loadSearchStatus();
   if (!document.hidden) loadLatest();
 }
 function deactivate() {
@@ -544,24 +558,27 @@ onUnmounted(() => {
         }}
       </button>
     </header>
-    <section class="reddit-connection" aria-label="Reddit connection">
+    <section class="reddit-connection" aria-label="Research sources">
       <div class="reddit-connection-heading">
         <p role="status" aria-live="polite">
-          <strong>Reddit</strong> ·
-          {{ redditStatusLoading ? "Checking connection…" : redditStatusError || redditStatus?.message || "Connection not checked." }}
-          <span v-if="!redditStatusLoading && !redditStatusError && redditStatus?.username"> (u/{{ redditStatus.username }})</span>
+          <strong>Public research</strong> · {{ searchStatus?.message || "Checking search configuration…" }}
         </p>
-        <button class="button button-quiet" type="button" :disabled="redditStatusLoading" @click="loadRedditStatus">
-          Refresh Reddit status
-        </button>
+        <button class="button button-quiet" type="button" @click="loadSearchStatus">Refresh search status</button>
       </div>
-      <details v-if="!redditStatus?.authenticated || redditStatusError">
-        <summary>Connect Reddit through Chrome</summary>
-        <p>Install <code>npm install -g @jackwener/opencli@2.0.2</code> on the computer running the backend.
-          Add the <a href="https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk" target="_blank" rel="noopener noreferrer">OpenCLI extension</a>
-          to your signed-in Chrome profile and keep Chrome open. Run <code>opencli doctor</code>,
-          then refresh the status here.</p>
-        <p class="muted">Reddit uses your existing Chrome session. If browser collection is unavailable, research continues with web search.</p>
+      <details v-if="searchStatus?.communities?.length">
+        <summary>Additional communities ({{ searchStatus.communities.length }})</summary>
+        <ul class="source-directory">
+          <li v-for="source in searchStatus.communities" :key="source.url">
+            <a :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.name }}</a>
+          </li>
+        </ul>
+        <p class="muted">Five sites are searched together per problem query, rotating across all 20 communities. Index coverage varies; a search does not guarantee results from every site.</p>
+      </details>
+      <details>
+        <summary>Optional Reddit posting account</summary>
+        <p class="muted">Research uses Exa and public Hacker News search. Checking a posting account uses your signed-in Chrome session only when you click the button below.</p>
+        <button class="button" type="button" :disabled="redditStatusLoading" @click="loadRedditStatus">Check Reddit posting account</button>
+        <p v-if="redditStatus || redditStatusError" class="muted">{{ redditStatusError || redditStatus?.message }} <span v-if="redditStatus?.username">(u/{{ redditStatus.username }})</span></p>
       </details>
     </section>
     <p v-if="error" role="alert" class="error-notice">
@@ -617,7 +634,7 @@ onUnmounted(() => {
           <label
             ><span class="sr-only">Show</span
             ><select v-model="filter" aria-label="Show prospects">
-              <option value="all">All prospects</option>
+              <option value="all">45%+ product fit</option>
               <option value="ready">Ready to introduce</option>
             </select></label
           >
@@ -646,7 +663,10 @@ onUnmounted(() => {
               {{ sourceLabel(post.url)
               }}<template v-if="post.author"> · {{ post.author }}</template> ·
               {{ postDate(post.published_at) }}
-              <template v-if="post.collection_source === 'reddit_cli'"> · Reddit CLI</template>
+              <template v-if="post.collection_source === 'reddit_cli'"> · Reddit CLI (saved run)</template>
+              <template v-if="post.collection_source === 'exa'"> · Exa excerpt</template>
+              <template v-if="post.collection_source === 'exa_community'"> · Public community excerpt</template>
+              <template v-if="post.collection_source === 'hn_algolia'"> · Hacker News public search</template>
               <template v-else-if="post.collection_source === 'web_fallback'"> · Web fallback</template>
             </p>
             <h4 :id="`${postId(post)}-title`" class="prospect-title">
@@ -960,7 +980,7 @@ onUnmounted(() => {
               : allPosts.length
                 ? "No prospects are ready for an introduction yet"
                 : run
-                  ? "No qualified conversations found"
+                  ? "No conversations with at least 45% product fit"
                   : "No conversations yet"
           }}
         </h4>
@@ -1031,12 +1051,17 @@ onUnmounted(() => {
               <p class="muted">{{ item.theme }} · {{ item.status }}</p>
               <p>{{ item.finding }}</p>
               <p v-if="item.reddit" class="muted">
-                Reddit CLI: {{ item.reddit.status }} · {{ item.reddit.result_count }} results ·
+                Reddit ({{ item.reddit.provider || "legacy CLI" }}): {{ item.reddit.status }} · {{ item.reddit.result_count }} results ·
                 {{ item.reddit.inspected_count }} posts inspected.
                 <template v-if="item.reddit.web_fallback !== 'not_needed'"> Web fallback: {{ item.reddit.web_fallback }}.</template>
               </p>
               <p v-if="item.reddit?.error" class="muted">{{ item.reddit.error }}</p>
-              <p v-if="!item.reddit" class="muted">Reddit CLI coverage: not recorded.</p>
+              <p v-if="!item.reddit" class="muted">Reddit search coverage: not recorded.</p>
+              <p v-if="item.hackernews" class="muted">Hacker News public search: {{ item.hackernews.status }} · {{ item.hackernews.result_count }} results · {{ item.hackernews.inspected_count }} excerpts inspected.</p>
+              <p v-if="item.hackernews?.error" class="muted">{{ item.hackernews.error }}</p>
+              <p v-if="item.communities" class="muted">Community search: {{ item.communities.status }} · {{ item.communities.result_count }} excerpts · {{ item.communities.inspected_count }} inspected.</p>
+              <p v-if="item.communities?.domains" class="muted">Sites queried together: {{ item.communities.domains.join(", ") }}.</p>
+              <p v-if="item.communities?.error" class="muted">{{ item.communities.error }}</p>
             </li>
           </ol>
         </details>
@@ -1075,8 +1100,7 @@ onUnmounted(() => {
           </p>
         </details>
         <p class="muted">
-          Research runs 20 public searches across X, Reddit, LinkedIn and Hacker
-          News. A full pass can take 10–30 minutes. Nothing is posted or sent.
+          Research runs 20 problem queries across X, Reddit, Hacker News and 20 additional public communities, limited to the last 48 hours. A full pass can take 10–30 minutes. Nothing is posted or sent.
         </p>
       </template>
     </details>
@@ -1084,6 +1108,15 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.source-directory {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 0.5rem 1.5rem;
+  padding-block: 0.75rem;
+  font-size: 0.875rem;
+}
+.source-directory a { text-decoration: underline; text-underline-offset: 3px; }
+
 .prospects-page {
   font-size: 1rem;
   line-height: 1.6;

@@ -26,7 +26,8 @@ from app.storage import GrowthStore
 from app.interests import collect_interest_context
 from app.feed import fetch_feed_page
 from app.trends import ResearchError, fetch_trending_research
-from app.reddit_cli import connection_status as reddit_connection_status
+from app import reddit_cli
+from app.prospect_search import status as prospect_search_status
 from app.prospects import (
     get_run as get_prospect_run, start_run as start_prospect_run, suggest_response,
     compact_run, run_progress, research_details, get_prospect, save_draft, draft_versions, publish_reply,
@@ -81,9 +82,14 @@ def article_read(request: ArticleRequest):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@app.get("/api/prospects/sources/research/status")
+def public_research_status():
+    return prospect_search_status()
+
+
 @app.get("/api/prospects/sources/reddit/status")
 def prospect_reddit_status():
-    return reddit_connection_status()
+    return reddit_cli.connection_status()
 
 
 @app.post("/api/prospects/runs")
