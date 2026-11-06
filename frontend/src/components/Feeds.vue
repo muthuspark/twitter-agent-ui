@@ -35,6 +35,7 @@ import {
   saveBlockedTerms,
 } from "../lib/blocklist";
 import FeedThread from "./FeedThread.vue";
+import ImageLightbox from "./ImageLightbox.vue";
 
 const blockListOpen = ref(false);
 
@@ -606,15 +607,10 @@ onBeforeUnmount(stop);
                 v-for="(media, index) in tweet.media"
                 :key="`${tweet.id}-${index}`"
               >
-                <img
+                <ImageLightbox
                   v-if="media.type === 'photo' && safeMediaUrl(media.url)"
                   :src="safeMediaUrl(media.url)"
-                  :width="media.width || undefined"
-                  :height="media.height || undefined"
                   :alt="mediaAltText(media, index)"
-                  loading="lazy"
-                  decoding="async"
-                  referrerpolicy="no-referrer"
                 />
                 <a
                   v-else

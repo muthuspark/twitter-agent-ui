@@ -38,7 +38,7 @@ npm --prefix frontend install
 npm --prefix frontend run dev
 ```
 
-Open the Vite URL, usually `http://localhost:5173`.
+Open the Vite URL, usually `http://localhost:5177`.
 
 ## Run Both Services
 
@@ -50,7 +50,7 @@ Open the Vite URL, usually `http://localhost:5173`.
 Defaults:
 
 - Backend: `http://127.0.0.1:8010`
-- Frontend: `http://localhost:5173`
+- Frontend: `http://localhost:5177`
 - Logs and PID files: `.run/`
 
 You can override ports:

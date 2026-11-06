@@ -14,6 +14,7 @@ import { createFeedBlockMatcher } from "../lib/blocklist";
 import { isEnglishFeedPost, mediaAltText, mergeFeedPage, safeMediaUrl } from "../lib/feed";
 import { formatDate, formatMetric } from "../lib/format";
 import { tweetUrl } from "../lib/social";
+import ImageLightbox from "./ImageLightbox.vue";
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -210,15 +211,10 @@ onBeforeUnmount(deactivate);
         </blockquote>
         <div v-if="tweet.media?.length" class="feed-media mt-3">
           <template v-for="(media, index) in tweet.media" :key="index">
-            <img
+            <ImageLightbox
               v-if="media.type === 'photo' && safeMediaUrl(media.url)"
               :src="safeMediaUrl(media.url)"
-              :width="media.width || undefined"
-              :height="media.height || undefined"
               :alt="mediaAltText(media, index)"
-              loading="lazy"
-              decoding="async"
-              referrerpolicy="no-referrer"
             />
             <a
               v-else

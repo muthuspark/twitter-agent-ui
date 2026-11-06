@@ -18,6 +18,8 @@ from app.codex_client import (
     CodexBusyError,
     analyze_with_codex,
     generate_post_ideas_with_codex,
+    generate_comment_alternatives_with_codex,
+    refine_post_with_codex,
     curate_research_for_essay,
 )
 from app.editorial import EditorialContextError, load_editorial_context, essay_source
@@ -66,6 +68,29 @@ def get_growth_store() -> GrowthStore:
 
 class ArticleRequest(BaseModel):
     url: str
+
+
+class RefinePostRequest(BaseModel):
+    post_text: str
+
+
+@app.post("/api/posts/refine")
+def refine_post(request: RefinePostRequest):
+    post_text = request.post_text.strip()
+    if not post_text:
+        raise HTTPException(status_code=422, detail="Write a post before refining it.")
+    if len(post_text) > 280:
+        raise HTTPException(status_code=422, detail="Post text must be 280 characters or fewer.")
+    try:
+        return {"ok": True, "post_text": refine_post_with_codex(post_text)}
+    except CodexBusyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CodexTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except CodexConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CodexError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/articles/read")
@@ -312,6 +337,116 @@ def growth_discover(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@app.get("/api/growth/comment-candidates")
+def growth_comment_candidates() -> dict[str, Any]:
+    return {"ok": True, "candidates": get_growth_store().pending_recommendations()}
+
+
+@app.post("/api/growth/comment-candidates/{recommendation_id}/alternatives")
+def growth_comment_alternatives(recommendation_id: int = ApiPath(gt=0)) -> dict[str, Any]:
+    store = get_growth_store()
+    candidate = next(
+        (item for item in store.pending_recommendations() if item["id"] == recommendation_id),
+        None,
+    )
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Comment candidate not found.")
+    try:
+        alternatives = generate_comment_alternatives_with_codex(
+            candidate["tweet"], candidate["comment"], preference_memory=store.preference_memory()
+        )
+        return {"ok": True, "alternatives": alternatives}
+    except CodexBusyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CodexTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except CodexConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CodexError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/growth/comment-candidates/refresh")
+def refresh_comment_candidates(request: dict[str, Any]) -> dict[str, Any]:
+    query = resolve_search_query(request.get("query"))
+    try:
+        max_results = max(1, min(30, int(request.get("max", 12) or 12)))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Max candidates must be between 1 and 30.") from exc
+    store = get_growth_store()
+    existing = store.pending_recommendations()
+    seen_ids = {str(item["tweet_id"]) for item in existing}
+    seen_ids.update(store.handled_recommendation_tweet_ids())
+    search_source = "search"
+    try:
+        result = search_tweets(query, max_results)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CliExecutionError as exc:
+        if not any(marker in str(exc).lower() for marker in ("not_found", "http 404")):
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # X sometimes returns 404 for its rotating private search GraphQL route.
+        # Keep discovery useful by reviewing the user's recent home timeline instead.
+        try:
+            result = fetch_feed_page(limit=max_results)
+        except CliNotFoundError as feed_exc:
+            raise HTTPException(status_code=503, detail=str(feed_exc)) from feed_exc
+        except CliTimeoutError as feed_exc:
+            raise HTTPException(status_code=504, detail=str(feed_exc)) from feed_exc
+        except (CliExecutionError, InvalidCliOutputError) as feed_exc:
+            raise HTTPException(status_code=502, detail=str(feed_exc)) from feed_exc
+        search_source = "home_timeline"
+    except CliNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CliTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except (CliExecutionError, InvalidCliOutputError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if search_source == "home_timeline":
+        raw_candidates = [
+            {**item, "sourceQuery": query}
+            for item in result.get("tweets", [])
+            if isinstance(item, dict) and item.get("id") and item.get("text")
+        ]
+    else:
+        raw_candidates = extract_tweet_candidates(result.data, query)
+    candidates = [
+        item for item in raw_candidates
+        if str(item["id"]) not in seen_ids
+    ]
+    if candidates:
+        profile_focus = str(request.get("profile_focus") or "AI, startups, software engineering, and useful conversations for founders and business teams")
+        if search_source == "home_timeline":
+            profile_focus += f" Prioritize posts related to the user's topic search: {query}."
+        try:
+            recommendations = analyze_candidates(candidates, profile_focus, store.preference_memory())
+        except CodexTimeoutError as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from exc
+        except CodexBusyError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except CodexConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except CodexError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        by_id = {str(item["id"]): item for item in candidates}
+        comments = []
+        for recommendation in recommendations:
+            if recommendation.get("action") != "comment":
+                continue
+            tweet = by_id.get(str(recommendation.get("tweet_id")))
+            if tweet:
+                comments.append({**recommendation, "tweet": tweet})
+        store.save_recommendations(comments)
+    return {
+        "ok": True,
+        "query": query,
+        "search_source": search_source,
+        "new_candidates": len(candidates),
+        "candidates": store.pending_recommendations(),
+    }
+
+
 @app.post("/api/growth/analyze")
 def growth_analyze(request: dict[str, Any]) -> dict[str, Any]:
     candidates = request.get("candidates", [])
@@ -393,6 +528,20 @@ def required_editorial_context():
 @app.get("/api/posts/editorial-direction")
 def editorial_direction():
     return {"ok": True, "direction": required_editorial_context()}
+
+
+@app.get("/api/posts/saved")
+def saved_posts(kind: str = Query("likes", pattern="^(likes|bookmarks)$")):
+    fetch = fetch_recent_liked_posts if kind == "likes" else fetch_recent_bookmarked_posts
+    try:
+        posts = fetch(40)
+    except CliNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CliTimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Loading saved posts timed out. Please retry.") from exc
+    except (CliExecutionError, InvalidCliOutputError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"ok": True, "posts": posts}
 
 
 @app.get("/api/posts/essay", response_class=PlainTextResponse)

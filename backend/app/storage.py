@@ -48,6 +48,8 @@ class GrowthStore:
                 """
             )
             self._ensure_column(connection, "actions", "metadata_json", "text not null default '{}'")
+            self._ensure_column(connection, "recommendations", "candidate_json", "text not null default '{}'")
+            self._ensure_column(connection, "recommendations", "comment_drafts_json", "text not null default '[]'")
 
     def _ensure_column(
         self,
@@ -66,25 +68,66 @@ class GrowthStore:
     def save_recommendations(self, recommendations: list[dict[str, Any]]) -> list[dict[str, Any]]:
         saved: list[dict[str, Any]] = []
         with self._connect() as connection:
+            pending = {
+                str(row["tweet_id"])
+                for row in connection.execute(
+                    """select r.tweet_id from recommendations r
+                    where not exists (select 1 from actions a where a.recommendation_id = r.id)"""
+                ).fetchall()
+            }
             for recommendation in recommendations:
+                tweet_id = str(recommendation["tweet_id"])
+                if tweet_id in pending:
+                    continue
                 cursor = connection.execute(
                     """
-                    insert into recommendations (tweet_id, action, confidence, reason, comment, risk)
-                    values (?, ?, ?, ?, ?, ?)
+                    insert into recommendations
+                        (tweet_id, action, confidence, reason, comment, risk, candidate_json, comment_drafts_json)
+                    values (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        recommendation["tweet_id"],
+                        tweet_id,
                         recommendation["action"],
                         int(recommendation["confidence"]),
                         recommendation.get("reason", ""),
                         recommendation.get("comment", ""),
                         recommendation.get("risk", "medium"),
+                        json.dumps(recommendation.get("tweet") or {}),
+                        json.dumps(recommendation.get("comment_drafts") or []),
                     ),
                 )
                 saved_item = dict(recommendation)
                 saved_item["id"] = cursor.lastrowid
                 saved.append(saved_item)
+                pending.add(tweet_id)
         return saved
+
+    def pending_recommendations(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """select r.id, r.tweet_id, r.action, r.confidence, r.reason, r.comment, r.risk,
+                          r.candidate_json, r.comment_drafts_json, r.created_at
+                   from recommendations r
+                   where r.action = 'comment'
+                     and not exists (select 1 from actions a where a.recommendation_id = r.id)
+                   order by r.id desc limit ?""",
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "tweet_id": row["tweet_id"],
+                "action": row["action"],
+                "confidence": row["confidence"],
+                "reason": row["reason"],
+                "comment": row["comment"],
+                "risk": row["risk"],
+                "tweet": json.loads(row["candidate_json"]),
+                "comment_drafts": json.loads(row["comment_drafts_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
 
     def record_action(
         self,
@@ -166,6 +209,14 @@ class GrowthStore:
                 from actions
                 where action = 'comment' and status = 'approved'
                 """
+            ).fetchall()
+        return {str(row["tweet_id"]) for row in rows}
+
+    def handled_recommendation_tweet_ids(self) -> set[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """select distinct tweet_id from actions
+                   where recommendation_id is not null"""
             ).fetchall()
         return {str(row["tweet_id"]) for row in rows}
 

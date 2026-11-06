@@ -138,7 +138,14 @@ def _run_json_command(command: list[str], timeout: int = 25) -> CliResult:
 
 
 def search_tweets(query: Any = None, limit: Any = 20) -> CliResult:
-    return _run_json_command(["twitter", "search", resolve_search_query(query), "--max", str(_coerce_max(limit)), "--json"])
+    command = ["twitter", "search", resolve_search_query(query), "--max", str(_coerce_max(limit)), "--json"]
+    for attempt in range(2):
+        try:
+            return _run_json_command(command, timeout=60)
+        except CliExecutionError as exc:
+            if attempt or not any(marker in str(exc).lower() for marker in ("not_found", "http 404")):
+                raise
+    raise CliExecutionError("Twitter search failed after retrying the X search endpoint.")
 
 
 def run_growth_action(action: str, tweet_id: str, comment_text: str | None = None) -> CliResult:
