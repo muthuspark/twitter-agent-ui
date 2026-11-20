@@ -22,7 +22,7 @@ from app.codex_client import (
     refine_post_with_codex,
     curate_research_for_essay,
 )
-from app.editorial import EditorialContextError, load_editorial_context, essay_source
+from app.editorial import PROFILE_FOCUS, EditorialContextError, load_editorial_context, essay_source
 from app.growth import GrowthValidationError, extract_tweet_candidates
 from app.storage import GrowthStore
 from app.interests import collect_interest_context
@@ -50,7 +50,7 @@ from app.twitter_cli import (
 
 load_environment()
 
-app = FastAPI(title="Twitter Agent API")
+app = FastAPI(title="Social Media Agent API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -353,7 +353,8 @@ def growth_comment_alternatives(recommendation_id: int = ApiPath(gt=0)) -> dict[
         raise HTTPException(status_code=404, detail="Comment candidate not found.")
     try:
         alternatives = generate_comment_alternatives_with_codex(
-            candidate["tweet"], candidate["comment"], preference_memory=store.preference_memory()
+            candidate["tweet"], candidate["comment"], preference_memory=store.preference_memory(),
+            opportunity=candidate.get("opportunity"),
         )
         return {"ok": True, "alternatives": alternatives}
     except CodexBusyError as exc:
@@ -416,7 +417,7 @@ def refresh_comment_candidates(request: dict[str, Any]) -> dict[str, Any]:
         if str(item["id"]) not in seen_ids
     ]
     if candidates:
-        profile_focus = str(request.get("profile_focus") or "AI, startups, software engineering, and useful conversations for founders and business teams")
+        profile_focus = str(request.get("profile_focus") or PROFILE_FOCUS)
         if search_source == "home_timeline":
             profile_focus += f" Prioritize posts related to the user's topic search: {query}."
         try:
@@ -454,7 +455,7 @@ def growth_analyze(request: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="Candidates are required")
     profile_focus = str(
         request.get("profile_focus")
-        or "AI, startups, software engineering, and personal brand"
+        or PROFILE_FOCUS
     )
     store = get_growth_store()
     preference_memory = store.preference_memory()

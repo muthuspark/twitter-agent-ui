@@ -141,7 +141,7 @@ watch(activeTab, (tab) => {
   >
     <div class="manuscript-shell">
       <header class="manuscript-header">
-        <h1 class="sr-only">Twitter Agent</h1>
+        <h1 class="sr-only">Social Media Agent</h1>
         <nav aria-label="Main navigation" class="manuscript-nav">
           <button
             v-for="view in views"

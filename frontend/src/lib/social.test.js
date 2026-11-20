@@ -209,3 +209,18 @@ describe("combinedGrowthButtonState", () => {
   expect(payload.metadata.source_tweet.text).toBe("Save this");
   expect(growthActionLabel("bookmark")).toBe("Bookmark");
 });
+
+test("keeps product opportunity context through rendering and approval", () => {
+  const opportunity = {
+    kind: "product",
+    need: "Chasing updates",
+    product_fit: "Reporting support, subject to setup",
+    click_reason: "Check the reporting workflow",
+    evidence_ids: ["E1"],
+  };
+  const [item] = normalizeRecommendations([
+    { id: 1, tweet_id: "123", action: "comment", opportunity, comment: "A relevant introduction." },
+  ], [{ id: "123", text: "Still chasing updates" }]);
+  expect(item.opportunity).toEqual(opportunity);
+  expect(buildGrowthActionPayload(item).metadata.opportunity).toEqual(opportunity);
+});

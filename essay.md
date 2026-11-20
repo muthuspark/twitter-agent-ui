@@ -1,117 +1,61 @@
-How AI Could Enable One Person Companies
+AI Agents and the Leadership of Enterprise AI Adoption
 
-Think of Charlie and the Chocolate Factory: an extraordinary factory, elaborate machines, and an owner whose imagination seems to determine what the whole operation can become.
+My area of expertise is AI agents and enterprise AI adoption leadership. This is where I want to focus my work, my writing, and the conversations I contribute to. The question I keep returning to is: how do organisations turn AI agents into dependable systems that people can use, trust, and improve?
 
-The image has stayed with me because it suggests something about the future of business. What happens when the scale of what a person can produce becomes much larger than the team they need to employ?
+An impressive demonstration is a starting point. Enterprise adoption requires a much longer chain of decisions: choosing a worthwhile problem, understanding the workflow, connecting the right systems, defining acceptable behaviour, preparing people for change, and measuring what happens after deployment.
 
-I have a strange theory. As AI becomes more capable, the number of people required to build and operate certain businesses could keep shrinking. A company that once needed a hundred people might eventually need twenty, then five, and perhaps, in some cases, just one.
+I am interested in that whole chain. Agent engineering and adoption leadership belong in the same conversation because technical choices shape how work changes, and organisational choices determine whether the technology becomes useful.
 
-That person would still depend on technology, infrastructure, and the work of others. But the business itself could have a single human owner and operator, directing capabilities that previously required an entire organisation.
+An agent needs a job worth doing
 
-The interesting part is what that would mean for individual ambition, income, and the relationship between work and ownership.
+Before choosing a model or an agent framework, I want to understand the work. Who performs it today? What information do they need? Which decisions require judgment? Where do delays, errors, and handoffs occur? Who is responsible for the result?
 
-Imagine that AI makes every employee in a company twice as productive. At first glance, the arithmetic looks simple: the company could produce the same output with half the workforce. Take that thought further. If someone could become a hundred times more productive, perhaps they could do work that previously required a hundred people.
+A useful starting point is a bounded workflow with a clear owner and an outcome that can be measured. An agent might gather evidence for a support case, investigate an operational exception, or prepare an analysis for review. These are possible applications, not claims about systems I have deployed.
 
-These are hypothetical multipliers, rather than measurements or forecasts. They help expose the logic of the argument. If technology keeps increasing what one person can accomplish, the minimum number of people needed to produce a particular result should fall.
+The decision to use an agent should follow from the problem. Some tasks need a predictable workflow, a search interface, or a simpler automation. More autonomy and more agents introduce additional behaviour to understand and control. The architecture should earn its complexity.
 
-But there is an important complication. Being a hundred times faster at one task does not make someone a hundred times more effective at running a business. Writing software is only part of building a software company. Someone must understand customers, choose what to build, sell it, maintain it, resolve failures, and accept responsibility when something goes wrong.
+Building agents that can be trusted with work
 
-For a company to shrink dramatically, automation would have to reach across enough of those activities. Otherwise, the bottleneck would simply move. A business that can build features almost instantly might still take months to win a customer's trust.
+I think about an agent as a system that uses a model, tools, context, and feedback to pursue a goal within defined boundaries. The important questions go beyond whether it produces a convincing answer. Can it access the right information? Does it have permission to take the next action? Can it recognise when it should stop or ask for help?
 
-This is where the idea of a software factory becomes interesting. Imagine a system that takes a customer's problem through research, design, development, testing, delivery, and ongoing maintenance. The owner decides what the factory should produce and what a good result looks like. AI agents and automated workflows carry out the work, check the output, and keep the operation running.
+Tool design, data quality, retrieval, memory, orchestration, and integration with existing systems all deserve attention. So do the ordinary operational details: timeouts, retries, duplicate actions, changing APIs, latency, and cost. A failure halfway through a workflow needs a recovery path.
 
-The destination I have in mind is Level 5 automation. I am using that phrase here to mean a factory that can run its everyday operations from beginning to end without a person directing each step. The owner sets goals and boundaries, judges whether the business is serving its customers, and remains responsible for its decisions. Reaching that level would require systems that can handle failures and unfamiliar situations reliably, not just complete a convincing demonstration.
+Reliability must be evaluated against the actual task. I want to know what success means, which errors are tolerable, which could cause harm, and how those cases will be tested. A benchmark score or a successful demo does not establish that an agent is ready for a particular enterprise workflow.
 
-Even with that limitation, the possibility is significant. As more activities become easier to automate, a smaller team could handle a broader range of responsibilities. Eventually, some businesses might need very little human coordination because there would be very few humans inside them.
+Evaluation should include representative tasks, difficult exceptions, tool failures, and attempts to manipulate the system through untrusted content. Once deployed, the system needs monitoring, traceable actions, and a way to detect when performance changes. Teams need enough visibility to investigate a failure and decide whether to change the model, the workflow, or the boundaries of automation.
 
-A carpenter provides a useful way to think about this.
+Autonomy is a decision about responsibility
 
-Consider someone who owns a small workshop and makes furniture alone. Their income depends partly on skill and reputation, but their production capacity has a physical limit. There are only so many tables they can make in a month.
+An agent that drafts a recommendation and an agent that changes a customer record carry different responsibilities. Reading information, proposing an action, and executing it should have explicit boundaries. Permissions should reflect the task, and consequential actions may require human approval.
 
-They can hire workers to increase that capacity. More people allow the workshop to accept more orders, although the owner must now manage wages, training, scheduling, and quality.
+Security, privacy, auditability, and human oversight belong in the design from the beginning. The questions are concrete: what data can the agent see, what can it change, who can approve an exception, and how can an action be stopped or reversed?
 
-Machines offer another route. A tool that cuts wood faster or more precisely can increase output without requiring a proportional increase in staff. Now imagine sufficiently capable robots that can perform more of the physical work. The carpenter could spend more time designing furniture, understanding customers, and deciding which orders to accept.
+Human involvement also needs a practical design. A review step only helps if the reviewer has the context, time, and authority to make a decision. Escalation should reach someone who owns the outcome. Calling a system human-in-the-loop does not explain whether that arrangement works.
 
-The workshop might become much larger while remaining under the direction of one person.
+Enterprise adoption is leadership work
 
-That does not guarantee the carpenter becomes wealthy. They still need customers. Competitors might acquire the same machines. Prices might fall. The cost of equipment could absorb much of the additional income. But their personal labour would no longer impose the same limit on the size of the business.
+A technically capable system can still fail to become part of everyday work. People need to understand its purpose, where it can be trusted, how their responsibilities change, and what to do when it fails. Leaders need to make those decisions explicit.
 
-AI could create a similar change in knowledge work. An individual could gain access to capabilities that once required hiring a developer, designer, analyst, researcher, or operations team. How far that goes will depend on the task and the reliability required. Still, the direction of the thought is clear: a person's capacity to execute could grow much faster than their headcount.
+I want to explore how business leaders, engineering teams, security teams, and the people doing the work build a shared operating model. Who owns the workflow? Who maintains the agent? Who approves a release? Who responds to an incident? Who decides whether the system is creating enough value to continue?
 
-This changes how I think about earning potential.
+Adoption also depends on incentives, training, and participation. The people closest to a workflow can reveal exceptions that a process diagram misses. Their feedback should influence the design, the evaluation, and the rollout. Giving people access to a tool is only one part of helping them use it well.
 
-We often connect income to effort, expertise, and the number of hours someone works. Those things matter, but they do not fully explain why one person earns far more than another. A great deal depends on what problem they solve, how many people need the solution, and whether they can capture part of the value they create.
+A pilot should answer a decision
 
-Complexity alone is insufficient. Someone can solve an extremely difficult problem that very few people care about. Another person can solve a relatively straightforward problem for millions of customers and build a substantial business.
+A pilot needs a baseline and a clear question. Can this agent improve a specific workflow while meeting its quality, risk, and cost requirements? What evidence would justify expanding it, changing it, or stopping it?
 
-In a world of individual software factories, I imagine many people making a decent income from a small operation serving a specific group of customers. A freelancer could run a factory that builds and maintains software for local businesses, while another operates a set of specialised products. Their earnings would come from what their factories deliver, with less dependence on the hours they can personally sell.
+Useful measures might include task completion, error rates, cycle time, review effort, cost per completed task, and sustained use. The right measures depend on the workflow. Time saved on an individual step may disappear into checking, rework, or another bottleneck. Claimed productivity gains need evidence across the relevant process.
 
-My expectation is that the people making more money would often be the ones running larger factories: systems capable of handling more customers, more products, or more valuable work at once. Factory size would mean productive capacity, rather than employee count. A larger factory would still need enough paying demand and sufficient margins to turn that capacity into higher income. Running more agents alone would not make someone richer.
+Scaling brings further decisions about shared infrastructure, ownership, support, governance, and integration. An organisation needs a way to learn across deployments while allowing teams to address their own business problems. Standardisation should make safe, useful delivery easier without assuming every workflow needs the same solution.
 
-AI could make it possible for more people to attempt valuable problems that were previously beyond their resources. A person who understands a particular industry might have a useful idea but lack the money to assemble a team. If AI lowers the cost of testing and delivering that idea, the distance between recognising a problem and building a business around it becomes smaller.
+The point of view I want to build
 
-Judgment would still matter. The person would need to decide whether the problem is real, whether the solution works, and whether customers will pay for it. They would also need a way to reach those customers.
+My focus is the connection between how AI agents are built and how enterprises adopt them successfully. I want to explain technical mechanisms clearly and examine the leadership decisions that make those mechanisms useful in practice.
 
-When execution becomes cheaper, choosing where to apply it becomes more consequential. Spending six months building the wrong thing remains a mistake, even if AI lets you build far more of it.
+Projects, research, and industry developments are valuable when they reveal something specific about agent capability, reliability, deployment, governance, adoption, or business outcomes. A new model or product deserves attention when there is a concrete implication for this work. Popularity alone is insufficient.
 
-There is a tempting conclusion here: layoffs will continue until companies have only one employee.
+I want my posts, comments, project analyses, and recommendations to build depth in this area. A short comment can identify a failure mode, clarify an architectural tradeoff, or ask who owns an outcome. A longer post can examine why a pilot stalls, how an evaluation should work, or what leaders need to decide before expanding autonomy.
 
-I understand the logic behind that prediction. If a business can serve the same customers with fewer people, it has an incentive to reduce costs. If competitors adopt the technology, the pressure could become stronger. What begins as a productivity advantage could become a requirement for staying competitive.
+I will distinguish evidence from expectation and a hypothetical example from a result. I do not want to imply that I have built, tested, or led something unless that experience has been supplied. Expertise should come through the quality of the reasoning and the usefulness of the questions.
 
-But that argument assumes the amount of work remains fixed.
-
-A company that becomes more productive has another choice. It can keep its people and attempt something larger. It could serve a market that was previously too expensive to reach, improve a product that was previously too costly to maintain, or pursue ideas it could not justify before.
-
-The same productivity gain could therefore lead to fewer employees, more output, lower prices, or some combination of all three. The outcome would depend on demand, competition, and the decisions of the people running the business.
-
-This is why I find the idea of permanently shrinking teams more convincing for particular kinds of businesses than as a universal prediction. Some companies could become extremely small. Others could use AI to grow into organisations doing work at a scale we would struggle to imagine today.
-
-My more radical, longer-term belief is that jobs as we know them could eventually disappear. I imagine a future in which everyone works independently, effectively becoming a freelancer who owns and runs a software factory. People and businesses would buy results from one another, and those results would be produced by automated systems under each owner's direction.
-
-In that future, being a freelancer would mean more than taking on contracts and doing the work yourself. It would mean operating a business whose production can continue while you are away. Someone could make a decent living with a modest factory, then expand its capacity as they find more customers and better problems to solve.
-
-That is the furthest version of my theory, and I do not know whether it will happen universally. Some work may continue to depend on employment, shared institutions, or close human collaboration. The question is whether owning productive systems could eventually become the normal way to earn a living, replacing the expectation that most people must find an employer.
-
-There is a historical parallel in agriculture.
-
-In many economies, a much larger share of the population once worked in farming. Improvements in tools, machinery, and agricultural methods allowed fewer workers to produce more food. Over time, employment shifted towards manufacturing and services.
-
-That transition did not mean food became less important. Agriculture remained essential. Its rising productivity meant that society could meet its food needs with a smaller share of its workforce, leaving more people available for other activities.
-
-Knowledge work could experience a comparable shift. Activities that occupy large teams today might eventually require much less human effort. People could then move towards different problems, new industries, or work whose value depends more heavily on human relationships and responsibility.
-
-But history does not promise an easy transition. A person who loses a job cannot instantly step into a new occupation. Skills take time to develop. New opportunities may appear somewhere else, require money the person does not have, or arrive too late to help.
-
-Nor should we describe every move away from an older occupation as a move into a “higher” role. Farming and carpentry are skilled, necessary forms of work. The meaningful change is in how labour is distributed and what people can produce with the tools available to them.
-
-The difficult question is whether new opportunities will emerge quickly enough, and be accessible enough, for the people whose existing work becomes less valuable.
-
-Ownership adds another complication.
-
-Two people could use the same AI system and experience very different financial outcomes. One might become a more productive employee while their employer captures most of the benefit. Another might use the system to build a business and retain part of its profits.
-
-Neither outcome is automatic. Employees can gain bargaining power, and business owners can lose money. But greater productivity does not, by itself, determine who receives the additional value.
-
-The owner of the tools, the customer relationship, or the distribution channel may be in a stronger position to benefit. If essential AI capabilities remain expensive or concentrated among a few providers, an individual operator could become heavily dependent on those providers.
-
-That is also the limit of the one person company idea. A business with one employee would still rely on a vast network of other people's work: computing infrastructure, energy, payment systems, logistics, equipment, and public institutions.
-
-A single person could direct the business without personally producing everything it needs. The organisation would become smaller while its dependence on the wider economy remained substantial.
-
-This matters because a world full of small companies could still concentrate wealth and power. Many independent operators might rely on the same platforms to build products, find customers, and collect payments. Greater freedom to start a business would not necessarily mean greater control over the conditions under which it operates.
-
-Even so, I find the possibility compelling.
-
-For a long time, building something substantial has often required assembling a substantial organisation. Ambition came with hiring, fundraising, management, and coordination. Many people had useful ideas but lacked the resources to organise all the work required to pursue them.
-
-AI could lower that threshold. More people could test ideas, serve specialised markets, and build businesses around knowledge they already possess. Some might choose to remain small because they value independence. Others might use the same tools to build larger companies.
-
-The Charlie and the Chocolate Factory image captures the attraction: a person with an unusual vision, surrounded by machinery capable of turning that vision into something far larger than their own labour could produce. The software factory is the version of that image I can imagine more people owning.
-
-The factory still needs customers. Its machines still need to work. Its owner still has to make good decisions. What changes is the scale of activity that can sit within one person's reach.
-
-I cannot confidently predict a world in which every company ends up with one employee. I can imagine a world in which the size of a team tells us much less about the size of the business it can build.
-
-In that world, a carpenter could run a workshop that produces like a factory. An individual with deep knowledge of a problem could build a service that once required several departments. A small team could take on work that previously belonged only to a large organisation.
-
-That is the possibility I keep returning to: someone who once needed permission, capital, and a hundred colleagues to pursue an idea might eventually have enough capability to begin on their own. If Level 5 automation becomes reliable and widely accessible, running a software factory could become an ordinary way to make a living. The ambition would shift from finding a better job to building a factory that serves customers well, earns a decent income, and can grow beyond the limits of its owner's time.
+The ambition is to help organisations make better decisions about AI agents: where to apply them, how to make them dependable, how to bring people along, and how to tell whether adoption is delivering value.

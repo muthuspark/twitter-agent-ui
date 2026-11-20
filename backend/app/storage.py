@@ -50,6 +50,7 @@ class GrowthStore:
             self._ensure_column(connection, "actions", "metadata_json", "text not null default '{}'")
             self._ensure_column(connection, "recommendations", "candidate_json", "text not null default '{}'")
             self._ensure_column(connection, "recommendations", "comment_drafts_json", "text not null default '[]'")
+            self._ensure_column(connection, "recommendations", "opportunity_json", "text not null default '{}'")
 
     def _ensure_column(
         self,
@@ -82,8 +83,8 @@ class GrowthStore:
                 cursor = connection.execute(
                     """
                     insert into recommendations
-                        (tweet_id, action, confidence, reason, comment, risk, candidate_json, comment_drafts_json)
-                    values (?, ?, ?, ?, ?, ?, ?, ?)
+                        (tweet_id, action, confidence, reason, comment, risk, candidate_json, comment_drafts_json, opportunity_json)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         tweet_id,
@@ -94,6 +95,7 @@ class GrowthStore:
                         recommendation.get("risk", "medium"),
                         json.dumps(recommendation.get("tweet") or {}),
                         json.dumps(recommendation.get("comment_drafts") or []),
+                        json.dumps(recommendation.get("opportunity") or {}),
                     ),
                 )
                 saved_item = dict(recommendation)
@@ -106,11 +108,12 @@ class GrowthStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """select r.id, r.tweet_id, r.action, r.confidence, r.reason, r.comment, r.risk,
-                          r.candidate_json, r.comment_drafts_json, r.created_at
+                          r.candidate_json, r.comment_drafts_json, r.opportunity_json, r.created_at
                    from recommendations r
                    where r.action = 'comment'
                      and not exists (select 1 from actions a where a.recommendation_id = r.id)
-                   order by r.id desc limit ?""",
+                   order by case when json_extract(r.opportunity_json, '$.kind') = 'product' then 0 else 1 end,
+                            r.confidence desc, r.id desc limit ?""",
                 (limit,),
             ).fetchall()
         return [
@@ -124,6 +127,7 @@ class GrowthStore:
                 "risk": row["risk"],
                 "tweet": json.loads(row["candidate_json"]),
                 "comment_drafts": json.loads(row["comment_drafts_json"]),
+                "opportunity": json.loads(row["opportunity_json"]),
                 "created_at": row["created_at"],
             }
             for row in rows
@@ -286,7 +290,7 @@ class GrowthStore:
         if approved_comments:
             comments = "; ".join(example["comment_text"] for example in approved_comments if example["comment_text"])
             summary_parts.append(
-                "Approved comment style favors specific, technical, useful replies"
+                "Approved examples guide phrasing only, not product fit or the traffic objective"
                 + (f": {comments}" if comments else ".")
             )
         if rejected:
@@ -327,5 +331,6 @@ class GrowthStore:
             "source_tweet": metadata.get("source_tweet") or {},
             "recommendation_reason": metadata.get("recommendation_reason") or "",
             "comment_drafts": metadata.get("comment_drafts") or [],
+            "opportunity": metadata.get("opportunity") or {},
             "created_at": record["created_at"],
         }

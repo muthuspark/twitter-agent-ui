@@ -155,11 +155,12 @@ def test_post_writing_style_applies_to_both_modes_over_voice_memory(use_research
     )
     system = captured['system']
     for requirement in [
-        'ASD-STE100', 'approximately 80%', 'not formal compliance',
-        'one main idea per sentence', 'Use active voice', 'Keep terminology consistent',
-        'concrete examples', 'Introduce complex ideas progressively',
-        'Preserve technical accuracy', 'conditions and uncertainty',
-        'comprehension, not merely brevity', 'take precedence over conflicting style',
+        'typed between meetings', 'Do not summarize the original post',
+        'one original observation', 'simple, conversational English',
+        'Fragments are fine', 'game changer', 'em dashes', '20 and 50 words',
+        '2–3 sentences', 'Do not force agreement', 'credentials, or anecdotes',
+        'Do not end with a question just to drive engagement',
+        'silently check', 'take precedence over conflicting style',
     ]:
         assert requirement in system
 
@@ -221,7 +222,7 @@ def test_default_request_researches_essay_and_uses_authority_post_types(monkeypa
     response = TestClient(main.app).post("/api/posts/ideas", json={"idea_type": "thought_leadership"})
     assert response.status_code == 200
     assert response.json()["source_mode"] == "trends"
-    assert "software factory" in captured["editorial_context"]["content"]
+    assert "AI agents and enterprise AI adoption leadership" in captured["editorial_context"]["content"]
 
 
 def test_mix_schema_only_returns_projects_and_thought_leadership(monkeypatch):

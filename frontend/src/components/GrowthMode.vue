@@ -15,7 +15,7 @@ import { formatDate, formatMetric } from "../lib/format";
 import { buildGrowthActionPayload, buildRecommendationMetadata, growthActionLabel, normalizeRecommendations } from "../lib/social";
 
 const defaultQuery = "";
-const profileFocus = ref("Jovis.ai target customers: founders, RevOps, sales ops, support ops, and business teams trying to get answers from live business data without waiting on SQL, dashboards, or data teams");
+const profileFocus = ref("Founders and team leaders looking for help with scattered context, reporting, decisions and follow-through");
 const query = ref(defaultQuery);
 const maxResults = ref(12);
 const candidates = ref([]);
@@ -200,11 +200,11 @@ onDeactivated(deactivateCandidates);
           <textarea
             v-model="query"
             class="min-h-24 rounded-sm border border-rule-strong bg-paper px-3 py-2 leading-5"
-            placeholder="Leave empty to rotate through your saved topic searches"
+            placeholder="Leave empty to search for workflow problems and tool requests"
           ></textarea>
         </label>
         <label class="grid gap-1.5 text-sm">
-          <span class="font-medium">Profile focus</span>
+          <span class="font-medium">Target customer</span>
           <textarea
             v-model="profileFocus"
             class="min-h-20 rounded-sm border border-rule-strong bg-paper px-3 py-2 leading-5"
@@ -245,7 +245,7 @@ onDeactivated(deactivateCandidates);
 
     <section class="manuscript-content">
       <h2 class="text-2xl font-bold">Comment candidates</h2>
-      <p class="text-sm text-muted">Posts where you may have something useful to add, with editable AI reply suggestions.</p>
+      <p class="text-sm text-muted">Find people with a problem Jovis can help solve. Product opportunities appear first; authority replies are secondary.</p>
       <div class="grid gap-3">
         <div
           v-if="error"
@@ -287,7 +287,15 @@ onDeactivated(deactivateCandidates);
             :key="item.id"
             class="rounded-sm border border-rule bg-paper p-4"
           >
+            <p class="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted">
+              {{ item.opportunity?.kind === 'product' ? 'Product opportunity' : item.opportunity?.kind === 'authority' ? 'Authority building · secondary' : 'Earlier suggestion · fit not assessed' }}
+            </p>
             <p class="text-sm leading-6 text-ink-secondary">{{ item.reason }}</p>
+            <dl v-if="item.opportunity?.kind === 'product'" class="mt-3 grid gap-2 text-sm leading-6">
+              <div><dt class="font-semibold">Expressed need</dt><dd>{{ item.opportunity.need }}</dd></div>
+              <div><dt class="font-semibold">Jovis fit and limitations</dt><dd>{{ item.opportunity.product_fit }}</dd></div>
+              <div><dt class="font-semibold">Reason to visit jovis.ai</dt><dd>{{ item.opportunity.click_reason }}</dd></div>
+            </dl>
 
             <div class="mt-4 border-t border-rule pt-4">
               <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -377,8 +385,8 @@ onDeactivated(deactivateCandidates);
             <p class="mt-1 text-sm leading-6 text-muted">
               {{
                 recommendations.length
-                  ? "The posts found did not have a specific reply worth recommending. Try another topic or check again later."
-                  : "Choose Find candidates now to search for conversations where you can add a useful reply."
+                  ? "No supported product opportunity or useful secondary reply qualified. Try another problem or check again later."
+                  : "Choose Find candidates now to look for workflow problems Jovis can help solve."
               }}
             </p>
           </div>
@@ -388,7 +396,7 @@ onDeactivated(deactivateCandidates);
           <div class="max-w-sm">
             <div class="font-semibold">Finding relevant conversations</div>
             <p class="mt-1 text-sm leading-6 text-muted">
-              New candidate posts will appear here with an editable reply suggestion. You stay in control of every reply.
+              Search for workflow problems and tool requests to find a natural introduction to Jovis. Every reply is editable and requires your approval.
             </p>
           </div>
         </div>

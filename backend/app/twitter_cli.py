@@ -1,10 +1,12 @@
 import json
+import os
+import re
 import random
 import subprocess
 from dataclasses import dataclass
 from typing import Any
 
-from app.growth import build_growth_action_command, build_post_command, extract_tweet_candidates
+from app.growth import GrowthValidationError, build_growth_action_command, build_post_command, extract_tweet_candidates
 
 
 class ValidationError(Exception):
@@ -33,22 +35,21 @@ class CliResult:
     data: Any
 
 
+# Find expressed workflow pain and solution requests, rather than broad AI commentary.
 JOVIS_SEARCH_QUERIES: tuple[str, ...] = (
-    "data team bottleneck",
-    "waiting on data team",
-    "manual reporting",
-    "chat with database",
-    "ask questions of data",
-    "AI data analyst",
-    "RevOps reporting",
-    "support analytics",
-    "CRM analytics",
-    "business users data",
-    "founder dashboard",
-    "dashboard is outdated",
-    "can't trust dashboard",
-    "spreadsheet reporting",
-    "single source of truth",
+    '"chasing updates"',
+    '"status updates" "hours"',
+    '"weekly report" "manual"',
+    '"decisions" "buried" "Slack"',
+    '"decision log" "tool"',
+    '"action items" "forgotten"',
+    '"Slack" "Notion" "scattered"',
+    '"meeting prep" "context"',
+    '"investor updates" "hours"',
+    '"project status" "without meetings"',
+    '"assistant" "track commitments"',
+    '"founder" "bottleneck" "decisions"',
+    '"single source of truth" "looking for"',
 )
 
 
@@ -129,9 +130,15 @@ def _run_json_command(command: list[str], timeout: int = 25) -> CliResult:
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise CliTimeoutError("The twitter command timed out") from exc
+        raise CliTimeoutError(
+            "OpenCLI timed out. Check your X profile before retrying; the post may already be live."
+            if command[0] != "twitter" else "The twitter command timed out"
+        ) from exc
     except FileNotFoundError as exc:
-        raise CliNotFoundError("The twitter CLI was not found on PATH") from exc
+        raise CliNotFoundError(
+            "OpenCLI was not found. Install it and keep Chrome open with the OpenCLI extension connected."
+            if command[0] != "twitter" else "The twitter CLI was not found on PATH"
+        ) from exc
 
     data = _parse_cli_response(completed)
     return CliResult(command=command, data=data)
@@ -150,11 +157,32 @@ def search_tweets(query: Any = None, limit: Any = 20) -> CliResult:
 
 def run_growth_action(action: str, tweet_id: str, comment_text: str | None = None) -> CliResult:
     command = build_growth_action_command(action, tweet_id, comment_text)
+    if action == "comment":
+        if not re.fullmatch(r"[0-9]{1,30}", str(tweet_id).strip()):
+            raise GrowthValidationError("Tweet id must contain only digits")
+        return _run_opencli_write("reply", f"https://x.com/i/status/{str(tweet_id).strip()}", command[3])
     return _run_json_command(command)
 
 
+def _run_opencli_write(action: str, *args: str) -> CliResult:
+    command = [os.environ.get("OPENCLI_PATH") or "opencli", "twitter", action, *args,
+               "-f", "json", "--window", "background"]
+    # Never retry a write or fall back to another transport after an uncertain result.
+    result = _run_json_command(command, timeout=120)
+    envelope = result.data
+    rows = envelope.get("data") if isinstance(envelope, dict) else None
+    if (not isinstance(envelope, dict) or envelope.get("ok") is not True
+            or not isinstance(rows, list) or len(rows) != 1
+            or not isinstance(rows[0], dict) or rows[0].get("status") != "success"):
+        raise InvalidCliOutputError(
+            "OpenCLI did not confirm publication. Check your X profile before retrying to avoid a duplicate."
+        )
+    return CliResult(command=command, data={"ok": True, "data": rows[0]})
+
+
 def run_post_action(post_text: str) -> CliResult:
-    return _run_json_command(build_post_command(post_text))
+    command = build_post_command(post_text)
+    return _run_opencli_write("post", command[2])
 
 
 def fetch_recent_liked_posts(limit: int = 20) -> list[dict[str, Any]]:

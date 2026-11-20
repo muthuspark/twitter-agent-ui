@@ -240,3 +240,26 @@ def test_changed_essay_blocks_stale_draft_approval(monkeypatch, essay):
     })
     assert response.status_code == 422
     assert 'changed' in response.json()['detail']
+
+
+@pytest.mark.parametrize("mode", ["recommendations", "alternatives"])
+def test_replies_receive_current_editorial_direction(monkeypatch, essay, mode):
+    def run(system, payload, schema, **kwargs):
+        assert payload["editorial_context"]["content"] == essay.read_text()
+        assert "enterprise AI adoption" in system
+        assert "voice memory" in system
+        if mode == "recommendations":
+            assert "Recommend skip for unrelated posts" in system
+            return '{"recommendations":[]}'
+        return json.dumps({"alternatives": [
+            "Who owns escalation when the agent cannot resolve a case?",
+            "Does the evaluation cover failed tool calls as well as successful ones?",
+        ]})
+
+    monkeypatch.setattr(codex_client, "_run_codex", run)
+    if mode == "recommendations":
+        codex_client.analyze_with_codex([], "An unrelated legacy profile")
+    else:
+        codex_client.generate_comment_alternatives_with_codex(
+            {"text": "Evaluating our enterprise support agent"}, "An earlier draft"
+        )

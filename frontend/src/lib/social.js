@@ -50,6 +50,7 @@ export function buildRecommendationMetadata(item) {
       sourceQuery: item?.tweet?.sourceQuery ?? "",
     },
     recommendation_reason: item?.reason ?? "",
+    ...(item?.opportunity ? { opportunity: item.opportunity } : {}),
     comment_drafts: item?.draftOptions ?? [],
   };
 }

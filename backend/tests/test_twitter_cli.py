@@ -65,18 +65,18 @@ def test_rejects_out_of_range_max():
         search_tweets("agents", 500)
 
 
-def test_builds_search_command_with_random_jovis_query_when_query_is_empty(monkeypatch):
-    monkeypatch.setattr("app.twitter_cli.random.choice", lambda queries: "RevOps reporting")
+def test_builds_search_command_with_random_problem_query_when_query_is_empty(monkeypatch):
+    monkeypatch.setattr("app.twitter_cli.random.choice", lambda queries: queries[0])
 
     monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, '{"ok":true}', ""))
     command = search_tweets(limit=10).command
 
-    assert command == ["twitter", "search", "RevOps reporting", "--max", "10", "--json"]
+    assert command == ["twitter", "search", JOVIS_SEARCH_QUERIES[0], "--max", "10", "--json"]
 
 
-def test_resolve_search_query_uses_jovis_target_customer_batch():
-    assert "data team bottleneck" in JOVIS_SEARCH_QUERIES
-    assert "single source of truth" in JOVIS_SEARCH_QUERIES
+def test_resolve_search_query_uses_buyer_problem_batch():
+    assert '"chasing updates"' in JOVIS_SEARCH_QUERIES
+    assert '"assistant" "track commitments"' in JOVIS_SEARCH_QUERIES
     assert resolve_search_query(" chat with database ") == "chat with database"
 
 
@@ -85,7 +85,7 @@ def test_runs_command_and_parses_json(monkeypatch):
         assert command == ["twitter", "search", "agents", "--max", "20", "--json"]
         assert capture_output is True
         assert text is True
-        assert timeout == 25
+        assert timeout == 60
         assert check is False
         return subprocess.CompletedProcess(command, 0, json.dumps({"ok": True}), "")
 
@@ -148,7 +148,7 @@ def test_post_accepts_cookie_progress_before_success_json_without_retry(monkeypa
     def run(command, **kwargs):
         calls.append(command)
         return subprocess.CompletedProcess(command, 0,
-            '\nGetting Twitter cookies...\n' + json.dumps({'ok': True, 'data': {'success': True, 'id': '123'}}),
+            '\nGetting Twitter cookies...\n' + json.dumps({'ok': True, 'data': [{'status': 'success', 'id': '123'}]}),
             TRANSACTION_WARNING)
     monkeypatch.setattr(subprocess, 'run', run)
     result = run_post_action('Approved post')
@@ -176,3 +176,49 @@ def test_log_braces_and_trailing_garbage_do_not_become_a_success(monkeypatch):
         subprocess.CompletedProcess(command, 0, 'log {"ok":true}\nnot JSON', ''))
     with pytest.raises(InvalidCliOutputError, match='check your X profile'):
         run_post_action('Approved post')
+
+
+def test_reply_uses_opencli_url_and_passes_text_as_one_argument(monkeypatch):
+    from app.twitter_cli import run_growth_action
+    calls = []
+    text = "A reply with 'quotes', $(literal text) and a newline.\nStill one argument."
+    def run(command, **kwargs):
+        calls.append(command)
+        assert command == ['opencli', 'twitter', 'reply', 'https://x.com/i/status/123',
+                           text, '-f', 'json', '--window', 'background']
+        assert kwargs['timeout'] == 120
+        return subprocess.CompletedProcess(command, 0, json.dumps({
+            'ok': True, 'data': [{'status': 'success', 'text': text}]}), '')
+    monkeypatch.delenv('OPENCLI_PATH', raising=False)
+    monkeypatch.setattr(subprocess, 'run', run)
+    assert run_growth_action('comment', '123', text).data['ok'] is True
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('data', [
+    {'ok': True}, {'ok': True, 'data': []},
+    {'ok': True, 'data': [{'status': 'failed'}]},
+    {'ok': True, 'data': [{'status': 'pending'}]},
+])
+def test_opencli_requires_confirmed_success_and_never_retries(monkeypatch, data):
+    from app.twitter_cli import run_post_action
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, json.dumps(data), '')
+    monkeypatch.setattr(subprocess, 'run', run)
+    with pytest.raises(InvalidCliOutputError, match='Check your X profile'):
+        run_post_action('Approved post')
+    assert len(calls) == 1
+
+
+def test_opencli_timeout_does_not_retry_or_fall_back(monkeypatch):
+    from app.twitter_cli import run_growth_action
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+    monkeypatch.setattr(subprocess, 'run', run)
+    with pytest.raises(CliTimeoutError, match='may already be live'):
+        run_growth_action('comment', '123', 'Approved reply')
+    assert len(calls) == 1

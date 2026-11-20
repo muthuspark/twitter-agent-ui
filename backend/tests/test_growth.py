@@ -161,15 +161,15 @@ def test_run_growth_action_executes_safe_argument_list(monkeypatch):
 
 def test_run_post_action_executes_safe_argument_list(monkeypatch):
     def fake_run(command, capture_output, text, timeout, check):
-        assert command == ["twitter", "post", "Approved post", "--json"]
-        return subprocess.CompletedProcess(command, 0, json.dumps({"ok": True, "id": "post-1"}), "")
+        assert command == ["opencli", "twitter", "post", "Approved post", "-f", "json", "--window", "background"]
+        return subprocess.CompletedProcess(command, 0, json.dumps({"ok": True, "data": [{"status": "success", "id": "post-1"}]}), "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = run_post_action("Approved post")
 
-    assert result.command == ["twitter", "post", "Approved post", "--json"]
-    assert result.data == {"ok": True, "id": "post-1"}
+    assert result.command == ["opencli", "twitter", "post", "Approved post", "-f", "json", "--window", "background"]
+    assert result.data == {"ok": True, "data": {"status": "success", "id": "post-1"}}
 
 
 def test_parse_post_ideas_accepts_codex_json_shape():
@@ -347,7 +347,7 @@ def test_growth_store_builds_preference_memory_from_recent_decisions(tmp_path):
 
     memory = store.preference_memory()
 
-    assert "technical" in memory["summary"].lower()
+    assert "phrasing only" in memory["summary"].lower()
     assert memory["approved_comment_examples"][0]["comment_text"] == "Evals are the bottleneck, not orchestration."
     assert memory["rejected_examples"][0]["source_tweet"]["text"] == "AI will change everything"
     assert memory["skip_examples"][0]["source_tweet"]["author"]["screenName"] == "coach"

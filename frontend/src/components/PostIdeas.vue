@@ -9,6 +9,7 @@ import {
 } from "@lucide/vue";
 import { computed, onActivated, ref, watch } from "vue";
 import { formatDate } from "../lib/format";
+import { postIdeasInOrder } from "../lib/postIdeas";
 
 const draftStorageKey = "twitter-workbench-post-ideas-essay-v1";
 let saved = {};
@@ -30,6 +31,10 @@ const ideas = ref(
 );
 const loading = ref(false);
 const actionLoadingIndex = ref(null);
+const postingAll = ref(false);
+const batchProgress = ref({ posted: 0, total: 0 });
+const postingStatus = ref("");
+const postingBusy = computed(() => postingAll.value || actionLoadingIndex.value !== null);
 const error = ref("");
 const approved = ref(saved.approved ?? []);
 const likedPostsUsed = ref(saved.likedPostsUsed ?? null);
@@ -97,6 +102,18 @@ watch(
 );
 
 const hasIdeas = computed(() => ideas.value.length > 0);
+const pendingIdeas = computed(() => ideas.value
+  .map((idea, index) => ({ idea, index }))
+  .filter(({ index }) => !approved.value.includes(index)));
+const canPostAll = computed(() => pendingIdeas.value.length > 0
+  && pendingIdeas.value.every(({ idea, index }) => canPostIdea(idea, index)));
+
+function canPostIdea(idea, index) {
+  return Boolean(direction.value?.version && idea?.post_text?.trim()
+    && postLength(idea.post_text) <= 280
+    && idea.essay_version === direction.value.version
+    && !approved.value.includes(index));
+}
 
 function postLength(text) {
   return String(text ?? "").length;
@@ -119,9 +136,10 @@ async function requestJson(path, payload) {
 }
 
 async function generateIdeas() {
-  if (loading.value || actionLoadingIndex.value !== null || !direction.value)
+  if (loading.value || postingBusy.value || !direction.value)
     return;
   loading.value = true;
+  postingStatus.value = "";
   error.value = "";
   approved.value = [];
   likedPostsUsed.value = null;
@@ -153,12 +171,12 @@ async function generateIdeas() {
   }
 }
 
-async function approveIdea(idea, index) {
-  if (!idea?.post_text || actionLoadingIndex.value !== null) return;
+async function publishIdea(idea, index) {
+  if (!canPostIdea(idea, index)) throw new Error("This draft is not ready to post.");
   actionLoadingIndex.value = index;
   error.value = "";
   try {
-    await requestJson("/api/posts/approve", {
+    const body = await requestJson("/api/posts/approve", {
       post_text: idea.post_text,
       metadata: {
         post_idea: {
@@ -175,15 +193,47 @@ async function approveIdea(idea, index) {
         },
       },
     });
+    if (body.ok !== true || body.record?.result?.ok === false)
+      throw new Error("Publication was not confirmed. Check X before trying again.");
     approved.value = [...approved.value, index];
-  } catch (failure) {
-    error.value = failure.message;
   } finally {
     actionLoadingIndex.value = null;
   }
 }
 
+async function approveIdea(idea, index) {
+  if (loading.value || postingBusy.value || !canPostIdea(idea, index)) return;
+  postingStatus.value = "";
+  try {
+    await publishIdea(idea, index);
+  } catch (failure) {
+    error.value = failure.message;
+  }
+}
+
+async function postAllIdeas() {
+  if (loading.value || postingBusy.value || !canPostAll.value) return;
+  const pending = pendingIdeas.value.slice();
+  postingAll.value = true;
+  error.value = "";
+  postingStatus.value = "";
+  batchProgress.value = { posted: 0, total: pending.length };
+  try {
+    await postIdeasInOrder(pending, async ({ idea, index }) => {
+      await publishIdea(idea, index);
+      batchProgress.value.posted += 1;
+    });
+    postingStatus.value = `Posted all ${pending.length} drafts to X.`;
+  } catch (failure) {
+    error.value = `Stopped after ${batchProgress.value.posted} of ${pending.length} posts. ${failure.message}`;
+  } finally {
+    postingAll.value = false;
+  }
+}
+
 function rejectIdea(index) {
+  if (postingBusy.value) return;
+  postingStatus.value = "";
   ideas.value = ideas.value.filter((_, ideaIndex) => ideaIndex !== index);
   approved.value = approved.value
     .filter((approvedIndex) => approvedIndex !== index)
@@ -202,7 +252,7 @@ function rejectIdea(index) {
         <select
           id="idea-type"
           v-model="ideaType"
-          :disabled="loading"
+          :disabled="loading || postingBusy"
           class="min-h-11 border border-rule-strong bg-paper px-3 text-sm"
         >
           <option value="mix">All types</option>
@@ -213,7 +263,7 @@ function rejectIdea(index) {
         <input
           id="idea-count"
           v-model.number="count"
-          :disabled="loading"
+          :disabled="loading || postingBusy"
           class="min-h-11 border border-rule-strong bg-paper px-3 text-sm"
           aria-label="Number of ideas"
           max="8"
@@ -222,7 +272,7 @@ function rejectIdea(index) {
         />
         <button
           class="button button-primary"
-          :disabled="loading || actionLoadingIndex !== null || !direction"
+          :disabled="loading || postingBusy || !direction"
           type="submit"
         >
           <Sparkles
@@ -231,8 +281,25 @@ function rejectIdea(index) {
             aria-hidden="true"
           />{{ loading ? "Drafting…" : "Generate drafts" }}
         </button>
+        <button
+          class="button button-primary"
+          :disabled="loading || postingBusy || !canPostAll"
+          type="button"
+          @click="postAllIdeas"
+        >
+          <Send :size="16" aria-hidden="true" />
+          {{ postingAll
+            ? `Posting ${batchProgress.posted + 1} of ${batchProgress.total}…`
+            : `Post all${pendingIdeas.length ? ` (${pendingIdeas.length})` : ""}` }}
+        </button>
       </form>
     </header>
+    <p v-if="postingAll || postingStatus" role="status" class="mb-4 text-sm text-muted">
+      {{ postingAll ? `${batchProgress.posted} of ${batchProgress.total} posted. Keep this page open.` : postingStatus }}
+    </p>
+    <p v-else-if="pendingIdeas.length && !canPostAll && direction && !loading" class="mb-4 text-sm text-muted">
+      Each remaining draft needs 1–280 characters and the current essay version to post all.
+    </p>
     <details v-if="direction" class="writing-direction">
       <summary>Writing direction</summary>
       <h3 class="mt-2 font-semibold">{{ direction.title }}</h3>
@@ -331,7 +398,7 @@ function rejectIdea(index) {
               <textarea
                 v-model="idea.post_text"
                 :disabled="
-                  approved.includes(index) || actionLoadingIndex !== null
+                  approved.includes(index) || postingBusy
                 "
                 class="min-h-28 rounded-sm border border-rule-strong bg-paper px-3 py-2 leading-5"
               ></textarea>
@@ -407,11 +474,7 @@ function rejectIdea(index) {
               <button
                 class="button button-primary"
                 :disabled="
-                  actionLoadingIndex !== null ||
-                  approved.includes(index) ||
-                  !idea.post_text?.trim() ||
-                  postLength(idea.post_text) > 280 ||
-                  idea.essay_version !== direction?.version
+                  loading || postingBusy || !canPostIdea(idea, index)
                 "
                 type="button"
                 @click="approveIdea(idea, index)"
@@ -427,7 +490,7 @@ function rejectIdea(index) {
               </button>
               <button
                 class="button"
-                :disabled="actionLoadingIndex !== null"
+                :disabled="postingBusy"
                 type="button"
                 @click="rejectIdea(index)"
               >

@@ -6,17 +6,18 @@ from pathlib import Path
 
 ESSAY_PATH = Path(__file__).resolve().parents[2] / "essay.md"
 
+PROFILE_FOCUS = "AI agents and enterprise AI adoption leadership"
+
 COMPANY_RESEARCH_LENS = (
-    "The central research question is: What does this source reveal about the future of companies "
-    "as software factories run by one person or a small group of people? "
-    "A software factory coordinates AI agents, tools and automated workflows to deliver products "
-    "or services across business functions. Consider both solo operators and small groups. "
-    "For each source, identify the specific change in company structure, productive capacity, "
-    "human coordination, ownership, operating costs or responsibility, or a constraint preventing "
-    "that change. Explain this mechanism in essay_connection. Generic AI relevance or faster task "
-    "execution alone is insufficient without an implication for how the company operates. "
-    "Include evidence that supports, tests or challenges this future; do not assume the transition "
-    "is inevitable or require every source to endorse it. "
+    "The central research question is: How can enterprises build dependable AI agents and lead "
+    "their adoption to deliver measurable business outcomes? "
+    "Focus on agent architecture, tools, orchestration, evaluation, reliability, security, "
+    "governance, workflow integration, human oversight, change management and adoption leadership. "
+    "For each source, identify a concrete technical mechanism, deployment constraint, leadership "
+    "decision or business outcome relevant to AI agents or enterprise AI adoption. Explain this "
+    "connection in essay_connection. Generic AI relevance or popularity alone is insufficient. "
+    "Include evidence that supports, tests or challenges an approach; do not assume agents are "
+    "always appropriate or that adoption guarantees productivity or return on investment. "
 )
 
 

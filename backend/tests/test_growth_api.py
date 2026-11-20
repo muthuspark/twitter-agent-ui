@@ -542,9 +542,9 @@ def test_text_post_with_cookie_progress_records_success_once(monkeypatch, tmp_pa
     calls = []
     def run(command, **kwargs):
         calls.append(command)
-        assert command == ['twitter', 'post', 'Approved post', '--json']
+        assert command == ['opencli', 'twitter', 'post', 'Approved post', '-f', 'json', '--window', 'background']
         return subprocess.CompletedProcess(command, 0,
-            'Getting Twitter cookies...\n' + json.dumps({'ok': True, 'data': {'id': '123', 'success': True}}), '')
+            'Getting Twitter cookies...\n' + json.dumps({'ok': True, 'data': [{'id': '123', 'status': 'success'}]}), '')
     monkeypatch.setattr(subprocess, 'run', run)
     response = TestClient(main.app).post('/api/posts/approve', json={'post_text': 'Approved post'})
     assert response.status_code == 200

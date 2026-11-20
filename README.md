@@ -1,4 +1,4 @@
-# Twitter Agent
+# Social Media Agent
 
 Minimal Vue/Vite + FastAPI UI for the installed `twitter` CLI.
 
@@ -117,6 +117,12 @@ Apache License 2.0. See [LICENSE](./LICENSE).
 
 ## Post Ideas
 
+The post idea brief focuses on awareness of the future of jobs in the AI era,
+through AI agents and enterprise AI adoption leadership. Each idea has a catchy
+headline in `title` and a self-contained tweet in `post_text` with its own opening
+hook. Reach is an aim; drafts must keep the conversational style and avoid
+clickbait, unsupported job-loss claims or promises of virality.
+
 `essay.md` at the project root is the editorial foundation for every generation
 mode. The backend rereads the complete file on every request and fingerprints the
 version. Missing or incomplete essays stop generation. Popularity and voice
@@ -124,10 +130,19 @@ memory cannot replace this foundation. Each draft includes its idea type,
 an explicit connection to the essay and validated references. Ideas can develop,
 test or challenge the thesis; hypothetical claims must not become measured facts.
 
-Every source and draft must answer: **What does this reveal about the future of
-companies as software factories run by one person or a small group of people?**
-The connection must explain a change in how the company operates, or a concrete
-barrier to that change. Both supporting evidence and counterevidence qualify.
+Every source and draft must answer: **How can enterprises build dependable AI
+agents and lead their adoption to deliver measurable business outcomes?**
+The connection must explain a technical mechanism, deployment constraint, leadership
+decision or business outcome. Both supporting evidence and counterevidence qualify.
+Reply recommendations and alternatives use the same essay; unrelated posts should
+be skipped. Default discovery searches focus on agents and enterprise adoption.
+
+Posts, comments, reply alternatives, draft refinement and customer replies share
+the conversational writing rules: one original thought, 20–50 words, preferably
+2–3 sentences, and at most 280 characters on X. Avoid summaries, generic praise,
+corporate jargon, AI clichés, em dashes, hashtags, emojis and engagement bait.
+Fragments and respectful disagreement are welcome; invented experience is not.
+The model silently reviews each draft for natural phrasing before returning it.
 
 Research runs automatically. The full essay guides live web searches across recent
 news, Hacker News discussions, public social posts, project releases and research
@@ -141,7 +156,7 @@ does not invent current events.
 
 The form offers **All types**, **Projects**, or
 **Thought leadership**, plus draft count. Project posts examine
-actual recent projects, their mechanisms and limits for a solo operator. Thought
+actual recent projects, their mechanisms and limits for enterprise adoption. Thought
 leadership posts develop specific arguments, tradeoffs and implications within the
 essay's subject. There is no research-source or angle control; the essay supplies
 the direction. Saved source and angle choices do not affect new requests. Legacy
@@ -426,3 +441,56 @@ URLs. Markdown rendering disables raw HTML and rejects executable link schemes;
 the Markdown parser is loaded only with the reader tab. This feature requires an
 installed Twitter CLI version that supports the `article` command and access to
 the requested article through its current sign-in.
+
+
+### X publishing through OpenCLI
+
+Posts and replies use `opencli twitter post` and `opencli twitter reply` through
+signed-in Chrome. Keep Chrome open with the OpenCLI Browser Bridge extension
+connected and X logged in. Check the account with `opencli twitter whoami -f json`.
+Set `OPENCLI_PATH` if the binary is outside the backend's PATH. Search, likes and
+bookmarks continue to use the Twitter CLI.
+
+Publishing requires OpenCLI's explicit success result. Writes are never retried
+or sent through a second transport automatically. If a timeout leaves publication
+uncertain, check X before retrying. An account-level X sending limit can still
+apply through the browser; changing transports does not remove that limit.
+
+### LinkedIn likes through OpenCLI
+
+Run a bounded scan of up to 20 home-feed posts, using signed-in Chrome:
+
+```bash
+# Preview eligibility without sending likes
+PYTHONPATH=backend .venv/bin/python -m app.linkedin_likes
+# Like qualifying posts in this batch
+PYTHONPATH=backend .venv/bin/python -m app.linkedin_likes --apply --limit 20
+```
+
+Posts must have a visible reaction count of 0–4, no existing reaction from you,
+and substantive relevance to AI agents or enterprise AI adoption leadership.
+Promoted posts and unreadable counts are skipped. Relevance is classified through
+the app's existing Codex setup; OpenCLI itself does not require Linked API tokens.
+This uses total reactions as the conservative threshold, rather than treating
+missing counts as zero. The stock OpenCLI timeline currently misreads some counts.
+
+The automation rechecks the visible post immediately before clicking and records
+attempts in `.run/linkedin-likes.sqlite3`. It stops on uncertain results and does
+not retry them. Each command performs one batch; no recurring job is installed.
+LinkedIn's restrictions on unauthorized automation still apply.
+
+### Comment candidates for Jovis traffic
+
+Default X discovery rotates through workflow pain and solution requests (scattered
+context, status reporting, decisions and follow-through). Reply analysis prioritizes
+qualified visits to `https://jovis.ai`, using the same local source evidence collector
+as Customers (`JOVIS_REPO_PATH`). The expertise essay guides secondary authority
+replies; it is not evidence of product capabilities.
+
+Product opportunities appear before authority replies and show the expressed need,
+supported fit and limitations, and a reason to visit Jovis. Product recommendations
+without valid source evidence references are skipped. If source inspection is
+unavailable, drafting can still suggest secondary replies without product claims.
+Alternative drafts retain the opportunity context and recheck current evidence.
+Existing saved suggestions remain available and are labelled as unassessed; refresh
+to discover new opportunities. Publishing still requires approval for each reply.

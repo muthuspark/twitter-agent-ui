@@ -33,7 +33,7 @@ def test_cli_uses_schema_stdin_isolation_and_never_calls_http(monkeypatch):
     assert '--ignore-user-config' in command and '--ephemeral' in command
     assert 'image_generation' in command and 'shell_tool' in command
     assert 'Do not call tools' in captured['prompt']
-    assert 'ASD-STE100' in captured['prompt']
+    assert client.POST_WRITING_STYLE in captured['prompt']
     assert result[0]['post_text'] == 'A clear draft.'
     assert not Path(command[command.index('--cd') + 1]).exists()
 
@@ -101,3 +101,46 @@ def test_research_cli_enables_live_search_without_enabling_write_tools(monkeypat
     assert "shell_tool" in captured["command"]
     assert "Research using live web search" in captured["prompt"]
     assert "Do not call tools" not in captured["prompt"]
+
+
+@pytest.mark.parametrize("mode", ["comment", "alternatives", "refine"])
+def test_human_writing_rules_cover_all_short_form_writing(monkeypatch, mode):
+    def run(system, payload, schema, **kwargs):
+        assert client.POST_WRITING_STYLE in system
+        assert "ASD-STE100" not in system
+        assert "20 and 50 words" in system
+        if mode == "comment":
+            return '{"recommendations":[]}'
+        if mode == "alternatives":
+            return json.dumps({"alternatives": [
+                "A failed tool call needs somewhere to go. If nobody owns the handoff, adding more tools just gives the agent more ways to get stuck.",
+                "The review step can become the slowest part. Someone still needs enough context and time to catch what the agent missed before it goes out.",
+            ]})
+        return '{"post_text":"A short draft."}'
+
+    monkeypatch.setattr(client, "_run_codex", run)
+    if mode == "comment":
+        client.analyze_with_codex([], "AI agents")
+    elif mode == "alternatives":
+        client.generate_comment_alternatives_with_codex({"text": "Tool failures"}, "Old draft")
+    else:
+        client.refine_post_with_codex("A short draft.")
+
+
+@pytest.mark.parametrize("mode", ["essay", "research", "interests"])
+def test_job_future_brief_applies_to_every_post_idea_mode(monkeypatch, mode):
+    def run(system, payload, schema, **kwargs):
+        assert payload["post_idea_brief"] == client.POST_IDEA_BRIEF
+        assert "future of jobs in the AI era" in payload["post_idea_brief"]
+        assert client.POST_IDEA_DIRECTION in system
+        assert client.POST_WRITING_STYLE in system
+        assert "title is not published" in system
+        assert "sole editorial foundation" in system
+        return '{"ideas":[{"post_text":"An original thought about changing work."}]}'
+
+    monkeypatch.setattr(client, "_run_codex", run)
+    client.generate_post_ideas_with_codex(
+        "", "", count=1,
+        research_sources=[{"id": "project:1", "title": "Agent project"}] if mode == "research" else None,
+        recent_liked_posts=[{"id": "1", "text": "AI at work"}] if mode == "interests" else None,
+    )
